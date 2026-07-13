@@ -1,0 +1,3 @@
+# Allow the local reverse-engineering user group to pass the Goodix PC-FS1
+# through to a rootless QEMU/Podman process.
+SUBSYSTEM=="usb", ATTR{idVendor}=="27c6", ATTR{idProduct}=="5584", GROUP="users", MODE="0660"

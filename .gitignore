@@ -1,0 +1,6 @@
+/build/
+/captures/
+/windows-drivers/
+/session-ses_1415.md
+__pycache__/
+*.py[cod]
