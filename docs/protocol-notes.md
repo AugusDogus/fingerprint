@@ -393,6 +393,42 @@ up to 10 times through the TLS handshake/status path. On success it logs
 success. On handshake-in-progress statuses it retries; other errors fail the
 logic start.
 
+## libfprint Driver Status (2026-07-20)
+
+A working driver exists as `patches/goodixtls55x4-5584.patch` (base:
+TheWeirdDev/libfprint `55b4-experimental`, commit `d1ca62a`; see
+`patches/README.md` for apply/build/test instructions).
+
+Validated on the live device:
+
+- Activation: NOP, firmware family check (`GF32xx_RTSEC_APP_100xx`), PSK
+  hash check against the file-loaded value, `a2 05 14` reset, idle, `90`
+  config — all succeed.
+- TLS-PSK session via the fork's in-process OpenSSL server using the
+  recovered PSK.
+- Scan pipeline `36, 20, 36, 70, 82, 20, 36` (the Windows warm sequence)
+  delivers live 108x88 frames through the libfprint device API.
+- NBIS/mindtct on a live finger scan: `MINUTIAE_COUNT=10` (goal threshold
+  10; an empty frame scores 8, so image quality still needs FDT/gain
+  tuning before matching is trustworthy).
+
+New device-behavior findings:
+
+- The MCU drops off the USB bus after several seconds without host
+  traffic (observed as a disconnect + re-enumeration during a 15 s idle
+  wait). The driver sends NOP keepalives every 2.5 s while waiting for a
+  finger.
+- The 12-byte `e4` read request form (`flags + length + offset`) used by
+  the goodixtls fork is accepted by this unit (Windows sends the 8-byte
+  `flags + 0` form).
+- The fork's bulk OUT chunking (`GOODIX_EP_OUT_MAX_BUF_SIZE = 0x40`)
+  already satisfies the 64-byte URB requirement.
+- FDT baseline values: the Windows driver uses `0d 01 80 00 ...` (all
+  0x8000) in the cold session and per-unit tuned values
+  (`0d 01 80 a7 80 be 80 bb 80 aa 80 ad 80 ca 80 c0 80 b1 80 a3 80 bd
+  80 b8 80 a9`) in the warm session; the driver patch uses the warm
+  values.
+
 ## Linux TLS Session Established (2026-07-19)
 
 The full legitimate session was established from Linux without any
