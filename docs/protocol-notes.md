@@ -393,6 +393,51 @@ up to 10 times through the TLS handshake/status path. On success it logs
 success. On handshake-in-progress statuses it retries; other errors fail the
 logic start.
 
+## Linux TLS Session Established (2026-07-19)
+
+The full legitimate session was established from Linux without any
+persistent device-state change:
+
+1. Read-only `e4` read of TLV `0xbb010002` recovered the DPAPI blob
+   (`./build/goodix-probe rt-psk-read`).
+2. The blob was unsealed inside the owning Windows VM (DPAPI CurrentUser
+   scope under SYSTEM — the WinBio service context) yielding the 32-byte
+   PSK. Scripts: `~/Windows/GoodixRE/unseal-psk.ps1` and `run-unseal.ps1`.
+3. `tools/tls_manual_server.py` sends the captured warm-boot sequence
+   (NOP, version x2, PSK TLV reads, version, IAP, version, `a2 05 14`
+   sensor reset, register read, NOP, OTP), then `d0`, then completes TLS
+   1.2 PSK in-process using a fixed ServerHello (byte-exact copy of the
+   Windows one). The device Finished decrypted and its `verify_data`
+   matched, proving both sides derived identical session keys from the
+   recovered PSK.
+
+**Critical transport finding — bulk OUT URB chunking:** Windows submits
+bulk OUT writes as separate 64-byte URBs (capture frames 6748/6750). A
+single URB larger than 64 bytes is silently ignored by the MCU receive
+path. This blocked every early TLS attempt: the 90-byte ServerHello pack
+(128 bytes padded) must be written as two 64-byte URBs. All earlier
+failures ("device ignores ServerHello") traced to this, not to TLS
+content, packing, timing, or missing warm-up commands.
+
+**openssl `s_server` caveat:** it closes the accepted connection on stdin
+EOF, so any relay using it must keep its stdin pipe open
+(`tools/tls_relay.py` does).
+
+## Offline Capture Decryption (2026-07-19)
+
+TLS 1.2 PSK-CBC has no forward secrecy: with the PSK, every record in the
+usbmon capture decrypts offline. `tools/tls_capture_decrypt.py` implements
+the RFC 4279 premaster (`len || zeros || len || psk`), the TLS 1.2 PRF,
+AES-128-CBC record decryption, and HMAC-SHA256 verification (a wrong PSK
+or key schedule fails loudly). Results on the 2026-07-13 capture:
+
+- 2 TLS sessions, 4 encrypted Finished records and 4 image records
+  decrypted, all HMAC-verified.
+- Image plaintext: 14,256 bytes + 4-byte trailer = 88x108 12-bit sensor
+  frames; decoded via `rtsec_codec.decode_image` to
+  `captures/decrypted/session-*-image-{1,2}.pgm` (plausible no-finger
+  baseline frames, matching the init-time capture context).
+
 ## Firmware 10042 vs goodix-fp-dump 55x4 (offline comparison, 2026-07-20)
 
 Compared the capture against the public `goodix-fp-dump` `driver_55x4.py` /

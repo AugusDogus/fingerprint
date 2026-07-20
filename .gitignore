@@ -1,5 +1,6 @@
 /build/
 /captures/
+/.venv/
 /windows-drivers/
 /session-ses_1415.md
 __pycache__/

@@ -43,6 +43,19 @@ static const uint8_t RT_MCU_NOP_CMD[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+/* Read-only PRESET_PSK_READ_R of TLV 0xbb010002 (the DPAPI-encrypted PSK
+ * blob). Capture-confirmed shape; performs no device-state change. */
+static const uint8_t RT_MCU_PSK_READ_DPAPI_CMD[] = {
+    0xa0, 0x0c, 0x00, 0xac, 0xe4, 0x09, 0x00, 0x02,
+    0x00, 0x01, 0xbb, 0x00, 0x00, 0x00, 0x00, 0xff,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
 static void print_hex(const char *label, const uint8_t *buf, int len) {
     printf("%s (%d bytes):", label, len);
     for (int i = 0; i < len; i++) {
@@ -181,6 +194,15 @@ static int send_rt_version(libusb_device_handle *handle) {
     return read_responses(handle, 6000, 250, 4);
 }
 
+static int send_rt_psk_read(libusb_device_handle *handle) {
+    int rc = send_frame(handle, RT_MCU_PSK_READ_DPAPI_CMD, sizeof(RT_MCU_PSK_READ_DPAPI_CMD));
+    if (rc != 0) {
+        return rc;
+    }
+
+    return read_responses(handle, 6000, 250, 3);
+}
+
 int main(int argc, char **argv) {
     bool do_read = argc > 1 && strcmp(argv[1], "read") == 0;
     bool do_nop = argc > 1 && strcmp(argv[1], "nop") == 0;
@@ -189,6 +211,7 @@ int main(int argc, char **argv) {
     bool do_rt_nop = argc > 1 && strcmp(argv[1], "rt-nop") == 0;
     bool do_rt_version = argc > 1 && strcmp(argv[1], "rt-version") == 0;
     bool do_rt_wake_version = argc > 1 && strcmp(argv[1], "rt-wake-version") == 0;
+    bool do_rt_psk_read = argc > 1 && strcmp(argv[1], "rt-psk-read") == 0;
 
     libusb_context *ctx = NULL;
     int rc = libusb_init(&ctx);
@@ -227,8 +250,10 @@ int main(int argc, char **argv) {
         if (rc == 0) {
             rc = send_rt_version(handle);
         }
+    } else if (do_rt_psk_read) {
+        rc = send_rt_psk_read(handle);
     } else {
-        printf("no command sent; pass 'read', 'nop', 'version', 'wake-version', 'rt-nop', 'rt-version', or 'rt-wake-version'\n");
+        printf("no command sent; pass 'read', 'nop', 'version', 'wake-version', 'rt-nop', 'rt-version', 'rt-wake-version', or 'rt-psk-read'\n");
     }
 
     libusb_release_interface(handle, 0);
