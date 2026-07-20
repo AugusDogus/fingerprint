@@ -1,0 +1,985 @@
+diff --git a/examples/capture-minutiae.c b/examples/capture-minutiae.c
+new file mode 100644
+index 0000000..eea8d82
+--- /dev/null
++++ b/examples/capture-minutiae.c
+@@ -0,0 +1,217 @@
++/* Goal-proof example for the Goodix 27c6:5584 work: capture one frame
++ * through the libfprint device API, run NBIS minutiae detection on it,
++ * print the count, and exit 0 only when at least 10 minutiae are found.
++ *
++ * Based on examples/img-capture.c (LGPL-2.1-or-later).
++ */
++
++#define FP_COMPONENT "example-capture-minutiae"
++
++#include <stdio.h>
++#include <libfprint/fprint.h>
++#include <glib-unix.h>
++
++#include "storage.h"
++#include "utilities.h"
++
++#define MINUTIAE_GOAL 10
++
++typedef struct CaptureData
++{
++  GMainLoop    *loop;
++  GCancellable *cancellable;
++  unsigned int  sigint_handler;
++  int           ret_value;
++  const char   *filename;
++} CaptureData;
++
++static void
++capture_data_free (CaptureData *capture_data)
++{
++  g_clear_handle_id (&capture_data->sigint_handler, g_source_remove);
++  g_clear_object (&capture_data->cancellable);
++  g_main_loop_unref (capture_data->loop);
++  g_free (capture_data);
++}
++G_DEFINE_AUTOPTR_CLEANUP_FUNC (CaptureData, capture_data_free)
++
++static void
++on_device_closed (FpDevice *dev, GAsyncResult *res, void *user_data)
++{
++  CaptureData *capture_data = user_data;
++
++  g_autoptr(GError) error = NULL;
++
++  fp_device_close_finish (dev, res, &error);
++
++  if (error)
++    g_warning ("Failed closing device %s", error->message);
++
++  g_main_loop_quit (capture_data->loop);
++}
++
++static void
++capture_quit (FpDevice    *dev,
++              CaptureData *capture_data)
++{
++  if (!fp_device_is_open (dev))
++    {
++      g_main_loop_quit (capture_data->loop);
++      return;
++    }
++
++  fp_device_close (dev, NULL, (GAsyncReadyCallback) on_device_closed, capture_data);
++}
++
++static void
++on_minutiae_detected (FpImage *image, GAsyncResult *res, void *user_data)
++{
++  FpDevice *dev = user_data;
++  CaptureData *capture_data;
++  g_autoptr(GError) error = NULL;
++  GPtrArray *minutiae;
++
++  capture_data = g_object_get_data (G_OBJECT (dev), "capture-data");
++
++  if (!fp_image_detect_minutiae_finish (image, res, &error))
++    {
++      g_warning ("Minutiae detection failed: %s", error->message);
++      capture_quit (dev, capture_data);
++      return;
++    }
++
++  minutiae = fp_image_get_minutiae (image);
++  g_print ("MINUTIAE_COUNT=%d\n", minutiae ? (int) minutiae->len : 0);
++  if (minutiae && minutiae->len >= MINUTIAE_GOAL)
++    {
++      g_print ("goal proof met: %d minutiae >= %d\n",
++               minutiae->len, MINUTIAE_GOAL);
++      capture_data->ret_value = EXIT_SUCCESS;
++    }
++  else
++    {
++      g_warning ("goal proof not met: %d minutiae < %d",
++                 minutiae ? (int) minutiae->len : 0, MINUTIAE_GOAL);
++    }
++
++  capture_quit (dev, capture_data);
++}
++
++static void
++dev_capture_cb (FpDevice     *dev,
++                GAsyncResult *res,
++                void         *user_data)
++{
++  g_autoptr(GError) error = NULL;
++  CaptureData *capture_data = user_data;
++  FpImage *image = NULL;
++
++  g_clear_object (&capture_data->cancellable);
++
++  image = fp_device_capture_finish (dev, res, &error);
++  if (!image)
++    {
++      g_warning ("Error capturing data: %s", error->message);
++      capture_quit (dev, capture_data);
++      return;
++    }
++
++  save_image_to_pgm (image, capture_data->filename);
++  g_print ("image saved to %s, detecting minutiae...\n", capture_data->filename);
++
++  capture_data->cancellable = g_cancellable_new ();
++  fp_image_detect_minutiae (image, capture_data->cancellable,
++                            (GAsyncReadyCallback) on_minutiae_detected, dev);
++}
++
++static void
++start_capture (FpDevice *dev, CaptureData *capture_data)
++{
++  fp_device_capture (dev, TRUE, capture_data->cancellable,
++                     (GAsyncReadyCallback) dev_capture_cb, capture_data);
++}
++
++static void
++on_device_opened (FpDevice *dev, GAsyncResult *res, void *user_data)
++{
++  CaptureData *capture_data = user_data;
++
++  g_autoptr(GError) error = NULL;
++
++  if (!fp_device_open_finish (dev, res, &error))
++    {
++      g_warning ("Failed to open device %s", error->message);
++      capture_quit (dev, capture_data);
++      return;
++    }
++
++  g_print ("Opened device. ");
++
++  start_capture (dev, capture_data);
++}
++
++static gboolean
++sigint_cb (void *user_data)
++{
++  CaptureData *capture_data = user_data;
++
++  g_cancellable_cancel (capture_data->cancellable);
++
++  return G_SOURCE_CONTINUE;
++}
++
++int
++main (int argc, const char *argv[])
++{
++  g_autoptr(FpContext) ctx = NULL;
++  g_autoptr(CaptureData) capture_data = NULL;
++  GPtrArray *devices;
++  FpDevice *dev;
++
++  setenv ("G_MESSAGES_DEBUG", "all", 0);
++
++  ctx = fp_context_new ();
++
++  devices = fp_context_get_devices (ctx);
++  if (!devices)
++    {
++      g_warning ("Impossible to get devices");
++      return EXIT_FAILURE;
++    }
++
++  dev = discover_device (devices);
++  if (!dev)
++    {
++      g_warning ("No devices detected.");
++      return EXIT_FAILURE;
++    }
++
++  if (!fp_device_has_feature (dev, FP_DEVICE_FEATURE_CAPTURE))
++    {
++      g_warning ("Device %s doesn't support capture",
++                 fp_device_get_name (dev));
++      return EXIT_FAILURE;
++    }
++
++  capture_data = g_new0 (CaptureData, 1);
++  capture_data->ret_value = EXIT_FAILURE;
++  capture_data->loop = g_main_loop_new (NULL, FALSE);
++  capture_data->cancellable = g_cancellable_new ();
++  capture_data->sigint_handler = g_unix_signal_add_full (G_PRIORITY_HIGH,
++                                                         SIGINT,
++                                                         sigint_cb,
++                                                         capture_data,
++                                                         NULL);
++  if (argc == 2)
++    capture_data->filename = argv[1];
++  else
++    capture_data->filename = "finger.pgm";
++  fp_device_open (dev, capture_data->cancellable,
++                  (GAsyncReadyCallback) on_device_opened,
++                  capture_data);
++  g_object_set_data (G_OBJECT (dev), "capture-data", capture_data);
++
++  g_main_loop_run (capture_data->loop);
++
++  return capture_data->ret_value;
++}
+diff --git a/examples/meson.build b/examples/meson.build
+index f28a2d4..5155033 100644
+--- a/examples/meson.build
++++ b/examples/meson.build
+@@ -3,6 +3,7 @@ examples = [
+     'enroll',
+     'identify',
+     'img-capture',
++    'capture-minutiae',
+     'manage-prints',
+     'verify',
+ ]
+diff --git a/libfprint/drivers/goodixtls/goodix.c b/libfprint/drivers/goodixtls/goodix.c
+index 417a37c..da64c3f 100644
+--- a/libfprint/drivers/goodixtls/goodix.c
++++ b/libfprint/drivers/goodixtls/goodix.c
+@@ -75,6 +75,91 @@ data_to_str (guint8 *data, guint32 length)
+   return string;
+ }
+ 
++// ---- 27c6:5584 per-device secrets (read from a gitignored local file) ----
++//
++// Resolution order:
++//   1. $GOODIX5584_SECRETS_FILE
++//   2. /etc/goodix5584/psk.hex     (system services such as fprintd)
++//   3. captures/psk.hex relative to the cwd (repo-local tools)
++
++#define GOODIX_5584_SECRETS_SYSTEM "/etc/goodix5584/psk.hex"
++#define GOODIX_5584_SECRETS_DEFAULT "captures/psk.hex"
++
++static guint8 goodix_5584_psk[32];
++static guint8 goodix_5584_psk_hash[32];
++
++static gboolean
++goodix_5584_load_secrets (void)
++{
++  static gint state = 0; // 0 = not tried, 1 = loaded, -1 = failed
++  const char *path;
++  g_autofree gchar *contents = NULL;
++  g_auto (GStrv) lines = NULL;
++
++  if (state != 0)
++    return state == 1;
++
++  path = g_getenv ("GOODIX5584_SECRETS_FILE");
++  if (!path && g_file_test (GOODIX_5584_SECRETS_SYSTEM, G_FILE_TEST_EXISTS))
++    path = GOODIX_5584_SECRETS_SYSTEM;
++  if (!path)
++    path = GOODIX_5584_SECRETS_DEFAULT;
++
++  if (!g_file_get_contents (path, &contents, NULL, NULL))
++    {
++      fp_err ("could not read 5584 secrets file '%s'", path);
++      state = -1;
++      return FALSE;
++    }
++
++  lines = g_strsplit_set (contents, "\r\n", -1);
++  guint line_no = 0;
++  for (guint i = 0; lines[i] != NULL && line_no < 2; i++)
++    {
++      const gchar *hex = lines[i];
++
++      if (*hex == '\0' || *hex == '#')
++        continue;
++      if (strlen (hex) != 64)
++        {
++          fp_err ("5584 secrets file '%s': line %u is not 64 hex chars",
++                  path, i);
++          state = -1;
++          return FALSE;
++        }
++
++      guint8 *out = line_no == 0 ? goodix_5584_psk : goodix_5584_psk_hash;
++      for (guint n = 0; n < 32; n++)
++        if (sscanf (hex + n * 2, "%2hhx", out + n) != 1)
++          {
++            state = -1;
++            return FALSE;
++          }
++      line_no++;
++    }
++
++  state = line_no == 2 ? 1 : -1;
++  if (state == -1)
++    fp_err ("5584 secrets file '%s': expected psk and hash lines", path);
++  return state == 1;
++}
++
++const guint8 *
++goodix_5584_get_psk (void)
++{
++  if (!goodix_5584_load_secrets ())
++    return NULL;
++  return goodix_5584_psk;
++}
++
++const guint8 *
++goodix_5584_get_psk_hash (void)
++{
++  if (!goodix_5584_load_secrets ())
++    return NULL;
++  return goodix_5584_psk_hash;
++}
++
+ // ---- GOODIX RECEIVE SECTION START ----
+ 
+ void
+diff --git a/libfprint/drivers/goodixtls/goodix.h b/libfprint/drivers/goodixtls/goodix.h
+index d2f79a0..224963b 100644
+--- a/libfprint/drivers/goodixtls/goodix.h
++++ b/libfprint/drivers/goodixtls/goodix.h
+@@ -94,6 +94,11 @@ typedef void (*GoodixImageCallback)(FpDevice *dev,
+ gchar *data_to_str (guint8 *data,
+                     guint32 length);
+ 
++// 27c6:5584 per-device secrets loaded from a gitignored local file
++// (see GOODIX_5584_SECRETS_DEFAULT in goodix.c). NULL on failure.
++const guint8 *goodix_5584_get_psk (void);
++const guint8 *goodix_5584_get_psk_hash (void);
++
+ // ---- GOODIX RECEIVE SECTION START ----
+ 
+ void goodix_receive_done (FpDevice *dev,
+diff --git a/libfprint/drivers/goodixtls/goodix55x4.c b/libfprint/drivers/goodixtls/goodix55x4.c
+index 20db582..c2f8646 100644
+--- a/libfprint/drivers/goodixtls/goodix55x4.c
++++ b/libfprint/drivers/goodixtls/goodix55x4.c
+@@ -62,6 +62,9 @@ struct _FpiDeviceGoodixTls55X4 {
+ 
+   GSList *frames;
+ 
++  // Number of NOP keepalive polls done while waiting for the finger.
++  guint wait_ticks;
++
+   Goodix55X4Pix empty_img[GOODIX55X4_FRAME_SIZE];
+ };
+ 
+@@ -77,7 +80,6 @@ static void goodix55X4_reset_state(FpiDeviceGoodixTls55X4 *self) {}
+ 
+ enum activate_states {
+   ACTIVATE_READ_AND_NOP,
+-  ACTIVATE_ENABLE_CHIP,
+   ACTIVATE_NOP,
+   ACTIVATE_CHECK_FW_VER,
+   ACTIVATE_CHECK_PSK,
+@@ -106,7 +108,11 @@ static void check_firmware_version(FpDevice *dev, gchar *firmware,
+   fp_dbg("Device firmware: \"%s\"", firmware);
+   g_print("%s\n", firmware);
+ 
+-  if (strcmp(firmware, GOODIX_55X4_FIRMWARE_VERSION)) {
++  // 27c6:5584 reports GF3208_RTSEC_APP_10042 when cold and
++  // GF3268_RTSEC_APP_10042 after Windows initialization; accept the
++  // GF32xx RTSEC 100xx family rather than one exact string.
++  if (!g_str_has_prefix(firmware, "GF32") ||
++      !strstr(firmware, "_RTSEC_APP_100")) {
+     g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                 "Invalid device firmware: \"%s\"", firmware);
+     fpi_ssm_mark_failed(user_data, error);
+@@ -169,14 +175,24 @@ static void check_preset_psk_read(FpDevice *dev, gboolean success,
+     return;
+   }
+ 
+-  if (length != sizeof(goodix_55x4_psk_0)) {
++  // 27c6:5584: the on-device PSK hash is per-device; compare against the
++  // hash loaded from the gitignored secrets file (see goodix.c).
++  const guint8 *expected_hash = goodix_5584_get_psk_hash();
++  if (expected_hash == NULL) {
++    g_set_error(&error, G_IO_ERROR, G_IO_ERROR_FAILED,
++                "5584 PSK hash not available (secrets file missing?)");
++    fpi_ssm_mark_failed(user_data, error);
++    return;
++  }
++
++  if (length != 32) {
+     g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                 "Invalid device PSK: 0x%s", psk_str);
+     fpi_ssm_mark_failed(user_data, error);
+     return;
+   }
+ 
+-  if (memcmp(psk, goodix_55x4_psk_0, sizeof(goodix_55x4_psk_0))) {
++  if (memcmp(psk, expected_hash, 32)) {
+     g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                 "Invalid device PSK: 0x%s", psk_str);
+     fpi_ssm_mark_failed(user_data, error);
+@@ -193,22 +209,6 @@ static void check_idle(FpDevice *dev, gpointer user_data, GError *err) {
+   }
+   fpi_ssm_next_state(user_data);
+ }
+-static void check_sleep_realtek(FpDevice *dev, gboolean success, gpointer user_data, GError *err) {
+-
+-  if (err) {
+-    fpi_ssm_mark_failed(user_data, err);
+-    return;
+-  }
+-  if (!success) {
+-    fpi_ssm_mark_failed(user_data,
+-                        g_error_new(FP_DEVICE_ERROR, FP_DEVICE_ERROR_PROTO,
+-                                    "failed to put into sleep mode (realtek)"));
+-    return;
+-  } else {
+-    g_print("Device is now on sleep\n");
+-  }
+-  fpi_ssm_next_state(user_data);
+-}
+ static void check_config_upload(FpDevice *dev, gboolean success,
+                                 gpointer user_data, GError *error) {
+   if (error) {
+@@ -221,31 +221,6 @@ static void check_config_upload(FpDevice *dev, gboolean success,
+     fpi_ssm_next_state(user_data);
+   }
+ }
+-static void check_powerdown_scan_freq(FpDevice *dev, gboolean success,
+-                                      gpointer user_data, GError *error) {
+-  if (error) {
+-    fpi_ssm_mark_failed(user_data, error);
+-  } else if (!success) {
+-    fpi_ssm_mark_failed(user_data,
+-                        g_error_new(FP_DEVICE_ERROR, FP_DEVICE_ERROR_PROTO,
+-                                    "failed to set powerdown freq"));
+-  } else {
+-    // goodix_send_mcu_get_pov_image(dev, check_mcu_pov_image, user_data);
+-  }
+-}
+-
+-static void check_mcu_pov_image(FpDevice *dev, gboolean success,
+-                                gpointer user_data, GError *error) {
+-  if (error) {
+-    fpi_ssm_mark_failed(user_data, error);
+-  } else if (!success) {
+-    fpi_ssm_mark_failed(user_data,
+-                        g_error_new(FP_DEVICE_ERROR, FP_DEVICE_ERROR_PROTO,
+-                                    "failed to set powerdown freq"));
+-  } else {
+-    fpi_ssm_next_state(user_data);
+-  }
+-}
+ 
+ static void activate_run_state(FpiSsm *ssm, FpDevice *dev) {
+ 
+@@ -258,11 +233,6 @@ static void activate_run_state(FpiSsm *ssm, FpDevice *dev) {
+     goodix_send_nop(dev, check_none, ssm);
+     break;
+ 
+-  case ACTIVATE_ENABLE_CHIP:
+-    g_print("Enable Chip\n");
+-    goodix_send_enable_chip(dev, TRUE, check_none, ssm);
+-    break;
+-
+   case ACTIVATE_NOP:
+     g_print("NO OP\n");
+     goodix_send_nop(dev, check_none, ssm);
+@@ -338,23 +308,24 @@ static void activate_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
+ 
+ // ---- SCAN SECTION START ----
+ 
++// 27c6:5584: scan pipeline restricted to the command set observed in the
++// Windows capture (36 FDT mode, 20 image, 70 idle, 82 register read).
++// No 32/34 FDT down/up and no 60/92 sleep commands are sent.
+ enum SCAN_STAGES {
+-  SCAN_STAGE_CALIBRATE,
+-  SCAN_STAGE_SWITCH_TO_FDT_MODE,
+-  SCAN_STAGE_SWITCH_TO_FDT_DOWN,
++  SCAN_STAGE_FDT_MODE_CAL,
++  SCAN_STAGE_CAL_IMG,
++  SCAN_STAGE_FDT_MODE,
++  SCAN_STAGE_IDLE,
++  SCAN_STAGE_READ_REG,
++  SCAN_STAGE_FDT_DOWN,
+   SCAN_STAGE_GET_IMG,
+-  SCAN_STAGE_SWITCH_TO_FDT_MODE2,
+-  SCAN_STAGE_SWITCH_TO_FDT_UP_NO_REPLY,
+-  SCAN_STAGE_SWITCH_TO_FDT_UP,
+-//  SCAN_STAGE_SWITCH_TO_SLEEP_MODE,
+-//  SCAN_STAGE_SWITCH_TO_SLEEP_MODE_REALTEK,
+-  SCAN_STAGE_SWITCH_TO_FDT_DONE,
++  SCAN_STAGE_FDT_MODE2,
++  SCAN_STAGE_DONE,
+   SCAN_STAGE_NUM,
+ };
+ 
+ enum SLEEP_STAGES {
+-  SLEEP_STAGE_SWITCH_TO_SLEEP_MODE,
+-  SLEEP_STAGE_SWITCH_TO_SLEEP_MODE_REALTEK,
++  SLEEP_STAGE_IDLE,
+   SLEEP_STAGE_DEACTIVATE,
+   SLEEP_STAGE_NUM,
+ };
+@@ -371,15 +342,6 @@ static void check_none_cmd(FpDevice *dev, guint8 *data, guint16 len,
+   fpi_ssm_next_state(ssm);
+ }
+ 
+-static unsigned char get_pix(struct fpi_frame_asmbl_ctx *ctx,
+-                             struct fpi_frame *frame, unsigned int x,
+-                             unsigned int y) {
+-  return frame->data[x + y * GOODIX55X4_WIDTH];
+-}
+-
+-// Bitdepth is 12, but we have to fit it in a byte
+-static unsigned char squash(int v) { return v / 16; }
+-
+ static void decode_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
+                          const guint8 *raw_frame) {
+ 
+@@ -400,25 +362,6 @@ static void decode_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
+     }
+   }
+ }
+-static int goodix_cmp_short(const void *a, const void *b) {
+-  return (int)(*(short *)a - *(short *)b);
+-}
+-
+-static void rotate_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE]) {
+-  Goodix55X4Pix buff[GOODIX55X4_FRAME_SIZE];
+-
+-  for (int y = 0; y != GOODIX55X4_HEIGHT; ++y) {
+-    for (int x = 0; x != GOODIX55X4_WIDTH; ++x) {
+-      buff[x * GOODIX55X4_WIDTH + y] = frame[x + y * GOODIX55X4_WIDTH];
+-    }
+-  }
+-  memcpy(frame, buff, GOODIX55X4_FRAME_SIZE);
+-}
+-static void squash_frame(Goodix55X4Pix *frame, guint8 *squashed) {
+-  for (int i = 0; i != GOODIX55X4_FRAME_SIZE; ++i) {
+-    squashed[i] = squash(frame[i]);
+-  }
+-}
+ /**
+  * @brief Squashes the 12 bit pixels of a raw frame into the 4 bit pixels used
+  * by libfprint.
+@@ -480,28 +423,6 @@ postprocess_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
+   return sum != 0;
+ }
+ 
+-typedef struct _frame_processing_info {
+-  FpiDeviceGoodixTls55X4 *dev;
+-  GSList **frames;
+-
+-} frame_processing_info;
+-
+-static void process_frame(Goodix55X4Pix *raw_frame,
+-                          frame_processing_info *info) {
+-  struct fpi_frame *frame =
+-      g_malloc(GOODIX55X4_FRAME_SIZE + sizeof(struct fpi_frame));
+-  postprocess_frame(raw_frame, info->dev->empty_img);
+-  squash_frame_linear(raw_frame, frame->data);
+-
+-  *(info->frames) = g_slist_append(*(info->frames), frame);
+-}
+-
+-static void save_frame(FpiDeviceGoodixTls55X4 *self, guint8 *raw) {
+-  Goodix55X4Pix *frame = malloc(GOODIX55X4_FRAME_SIZE * sizeof(Goodix55X4Pix));
+-  decode_frame(frame, raw);
+-  self->frames = g_slist_append(self->frames, frame);
+-}
+-
+ static void scan_on_read_img(FpDevice *dev, guint8 *data, guint16 len,
+                              gpointer ssm, GError *err) {
+   g_print("SCAN_ON_READ_IMG\n");
+@@ -510,42 +431,22 @@ static void scan_on_read_img(FpDevice *dev, guint8 *data, guint16 len,
+     return;
+   }
+ 
++  // 27c6:5584: single press frame, subtracted against the calibration
++  // baseline captured at SCAN_STAGE_CAL_IMG.
+   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
+-  save_frame(self, data);
+-  if (g_slist_length(self->frames) <= GOODIX55X4_CAP_FRAMES) {
+-    fpi_ssm_jump_to_state(ssm, SCAN_STAGE_SWITCH_TO_FDT_MODE);
+-  } else {
+-    GSList *raw_frames = g_slist_nth(self->frames, 1);
+-
+-    FpImageDevice *img_dev = FP_IMAGE_DEVICE(dev);
+-    struct fpi_frame_asmbl_ctx assembly_ctx;
+-    assembly_ctx.frame_width = GOODIX55X4_WIDTH;
+-    assembly_ctx.frame_height = GOODIX55X4_HEIGHT;
+-    assembly_ctx.image_width = GOODIX55X4_WIDTH * 1;
+-    assembly_ctx.get_pixel = get_pix;
+-
+-    GSList *frames = NULL;
+-    frame_processing_info pinfo = {.dev = self, .frames = &frames};
+-
+-    g_slist_foreach(raw_frames, (GFunc)process_frame, &pinfo);
+-    frames = g_slist_reverse(frames);
+-
+-    g_print("MOVEMENT EST\n");
+-    fpi_do_movement_estimation(&assembly_ctx, frames);
+-    g_print("MOVEMENT EST DOOONEE\n");
+-    FpImage *img = fpi_assemble_frames(&assembly_ctx, frames);
++  FpImageDevice *img_dev = FP_IMAGE_DEVICE(dev);
+ 
+-    g_slist_free_full(frames, g_free);
+-    g_slist_free_full(self->frames, g_free);
+-    self->frames = g_slist_alloc();
++  Goodix55X4Pix *frame = malloc(GOODIX55X4_FRAME_SIZE * sizeof(Goodix55X4Pix));
++  decode_frame(frame, data);
++  postprocess_frame(frame, self->empty_img);
+ 
+-    g_print("Signal IMG Capture\n");
+-    fpi_image_device_image_captured(img_dev, img);
+-    // save_image_to_pgm(img, "finger.pgm");
++  FpImage *img = fp_image_new(GOODIX55X4_WIDTH, GOODIX55X4_HEIGHT);
++  squash_frame_linear(frame, img->data);
++  free(frame);
+ 
+-    g_print("Next State\n");
+-    fpi_ssm_next_state(ssm);
+-  }
++  g_print("Signal IMG Capture\n");
++  fpi_image_device_image_captured(img_dev, img);
++  fpi_ssm_next_state(ssm);
+ }
+ 
+ gboolean save_image_to_pgm2(guchar *data, const char *path) {
+@@ -606,12 +507,6 @@ gboolean save_image_to_pgm(FpImage *img, const char *path) {
+   return TRUE;
+ }
+ 
+-enum scan_empty_img_state {
+-  SCAN_EMPTY_GET_IMG,
+-
+-  SCAN_EMPTY_NUM,
+-};
+-
+ static void on_scan_empty_img(FpDevice *dev, guint8 *data, guint16 length,
+                               gpointer ssm, GError *error) {
+   if (error) {
+@@ -620,100 +515,83 @@ static void on_scan_empty_img(FpDevice *dev, guint8 *data, guint16 length,
+   }
+   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
+   decode_frame(self->empty_img, data);
+-  // FpImage *bgk = fp_image_new(GOODIX55X4_WIDTH, GOODIX55X4_HEIGHT);
+-  // squash_frame(self->empty_img, bgk->data);
+-  // save_image_to_pgm(bgk, "./background.pgm");
+   fpi_ssm_next_state(ssm);
+ }
+-static void scan_empty_run(FpiSsm *ssm, FpDevice *dev) {
+-
+-  switch (fpi_ssm_get_cur_state(ssm)) {
+-
+-  case SCAN_EMPTY_GET_IMG:
+-    goodix_tls_read_image(dev, on_scan_empty_img, ssm);
+-    break;
+-  }
+-}
+-
+-static void scan_empty_img(FpDevice *dev, FpiSsm *ssm) {
+-  fpi_ssm_start_subsm(ssm, fpi_ssm_new(dev, scan_empty_run, SCAN_EMPTY_NUM));
+-}
+ 
+ static void scan_get_img(FpDevice *dev, FpiSsm *ssm) {
+   goodix_tls_read_image(dev, scan_on_read_img, ssm);
+ }
+ 
++// FDT manual baseline values captured from the Windows driver on this
++// unit (warm session), preferred over the generic 55x4 defaults.
+ const guint8 fdt_switch_state_mode_55X4[] = {
+-    0x0d, 0x01, 0x80, 0x12, 0x80, 0xaf, 0x80, 0x9a, 0x80,
+-    0x87, 0x80, 0x12, 0x80, 0xa8, 0x80, 0x95, 0x80, 0x81,
+-    0x80, 0x12, 0x80, 0xa7, 0x80, 0x98, 0x80, 0x84};
+-
+-const guint8 fdt_switch_state_mode2_55X4[] = {
+-    0x0d, 0x01, 0x80, 0xb3, 0x80, 0xc6, 0x80, 0xbc, 0x80,
+-    0xa8, 0x80, 0xb9, 0x80, 0xca, 0x80, 0xc2, 0x80, 0xab,
+-    0x80, 0xb7, 0x80, 0xc6, 0x80, 0xbc, 0x80, 0xa6};
++    0x0d, 0x01, 0x80, 0xa7, 0x80, 0xbe, 0x80, 0xbb, 0x80,
++    0xaa, 0x80, 0xad, 0x80, 0xca, 0x80, 0xc0, 0x80, 0xb1,
++    0x80, 0xa3, 0x80, 0xbd, 0x80, 0xb8, 0x80, 0xa9};
+ 
++// FDT-down payload used by goodix-fp-dump's run_driver for the finger
++// capture phase (finger-present gain/thresholds + hardware detection).
+ const guint8 fdt_switch_state_down_55X4[] = {
+-    0x0c, 0x01, 0x80, 0xb1, 0x80, 0xc6, 0x80, 0xbc, 0x80,
+-    0xa6, 0x80, 0xb9, 0x80, 0xca, 0x80, 0xc2, 0x80, 0xab,
+-    0x80, 0xb7, 0x80, 0xc7, 0x80, 0xbc, 0x80, 0xa7};
+-
+-const guint8 fdt_switch_state_up_55X4[] = {
+-    0x0e, 0x01, 0x80, 0x92, 0x80, 0x9d, 0x80, 0x93, 0x80,
+-    0x92, 0x80, 0x97, 0x80, 0x9e, 0x80, 0xa0, 0x80, 0x8e,
+-    0x80, 0xab, 0x80, 0xa5, 0x80, 0xb0, 0x80, 0x12};
++    0x0c, 0x01, 0x80, 0xb0, 0x80, 0xc4, 0x80, 0xba, 0x80,
++    0xa6, 0x80, 0xb7, 0x80, 0xc7, 0x80, 0xc0, 0x80, 0xaa,
++    0x80, 0xb4, 0x80, 0xc4, 0x80, 0xba, 0x80, 0xa6};
+ 
+ static void scan_run_state(FpiSsm *ssm, FpDevice *dev) {
+   FpImageDevice *img_dev = FP_IMAGE_DEVICE(dev);
+ 
++  // Mirrors the warm image/calibration phase of the Windows capture:
++  // 36, 20, 36, 70, 82, 20, 36 — with a user prompt before the second
++  // image so a finger is actually on the sensor.
+   switch (fpi_ssm_get_cur_state(ssm)) {
+-  case SCAN_STAGE_CALIBRATE:
+-    scan_empty_img(dev, ssm);
++  case SCAN_STAGE_FDT_MODE_CAL:
++    g_print("calibration: keep finger OFF the sensor\n");
++    goodix_send_mcu_switch_to_fdt_mode(
++        dev, (guint8 *)fdt_switch_state_mode_55X4,
++        sizeof(fdt_switch_state_mode_55X4), NULL, check_none_cmd, ssm);
++    break;
++
++  case SCAN_STAGE_CAL_IMG:
++    goodix_tls_read_image(dev, on_scan_empty_img, ssm);
+     break;
+-  case SCAN_STAGE_SWITCH_TO_FDT_MODE:
+-    g_print("SWITCH TO FDT MODE\n");
++
++  case SCAN_STAGE_FDT_MODE:
+     goodix_send_mcu_switch_to_fdt_mode(
+         dev, (guint8 *)fdt_switch_state_mode_55X4,
+         sizeof(fdt_switch_state_mode_55X4), NULL, check_none_cmd, ssm);
+     break;
+ 
+-  case SCAN_STAGE_SWITCH_TO_FDT_DOWN:
+-    g_print("SWITCH TO FDT DOWN\n");
++  case SCAN_STAGE_IDLE:
++    goodix_send_mcu_switch_to_idle_mode(dev, 20, check_idle, ssm);
++    break;
++
++  case SCAN_STAGE_READ_REG:
++    goodix_send_read_sensor_register(dev, 0x0082, 2, check_none_cmd, ssm);
++    break;
++
++  case SCAN_STAGE_FDT_DOWN:
++    g_print("place finger ON the sensor\n");
++    fpi_image_device_report_finger_status(img_dev, TRUE);
++    // Hardware finger-detect mode: the following image request returns
++    // once a finger is present, in finger-tuned capture conditions.
+     goodix_send_mcu_switch_to_fdt_down(
+         dev, (guint8 *)fdt_switch_state_down_55X4,
+         sizeof(fdt_switch_state_down_55X4), NULL, check_none_cmd, ssm);
+     break;
++
+   case SCAN_STAGE_GET_IMG:
+     g_print("SWITCH TO GET IMAGE\n");
+-    fpi_image_device_report_finger_status(img_dev, TRUE);
+-    // Set Sensotr Register first to get valid output
+-    // device.write_sensor_register(0x022c, b"\x05\x03")
+-    // guint8 payload[] = {0x01, 0x00};
+-    // goodix_send_mcu_get_image(dev, check_none_cmd, ssm);
+-    // goodix_send_write_sensor_register(dev, 0x022c, payload,
+-    // write_sensor_complete, ssm);
+     scan_get_img(dev, ssm);
+     break;
+-  case SCAN_STAGE_SWITCH_TO_FDT_MODE2:
+-    g_print("SWITCH TO FDT MODE 2\n");
++
++  case SCAN_STAGE_FDT_MODE2:
+     goodix_send_mcu_switch_to_fdt_mode(
+-        dev, (guint8 *)fdt_switch_state_mode2_55X4,
+-        sizeof(fdt_switch_state_mode2_55X4), NULL, check_none_cmd, ssm);
+-    break;
+-  case SCAN_STAGE_SWITCH_TO_FDT_UP_NO_REPLY:
+-    g_print("SWITCH TO FDT UP NO REPLY\n");
+-    goodix_send_mcu_switch_to_fdt_up_no_reply(
+-        dev, (guint8 *)fdt_switch_state_up_55X4,
+-        sizeof(fdt_switch_state_up_55X4), NULL, check_none_cmd, ssm);
+-    break;
+-  case SCAN_STAGE_SWITCH_TO_FDT_UP:
+-    g_print("SWITCH TO FDT UP\n");
+-    goodix_send_mcu_switch_to_fdt_up(dev, (guint8 *)fdt_switch_state_up_55X4,
+-                                     sizeof(fdt_switch_state_up_55X4), NULL,
+-                                     check_none_cmd, ssm);
++        dev, (guint8 *)fdt_switch_state_mode_55X4,
++        sizeof(fdt_switch_state_mode_55X4), NULL, check_none_cmd, ssm);
+     break;
+-  case SCAN_STAGE_SWITCH_TO_FDT_DONE:
++
++  case SCAN_STAGE_DONE:
+     fpi_image_device_report_finger_status(img_dev, FALSE);
++    fpi_ssm_next_state(ssm);
+     break;
+   }
+ }
+@@ -722,35 +600,19 @@ static void sleep_run_state(FpiSsm *ssm, FpDevice *dev) {
+   FpImageDevice *img_dev = FP_IMAGE_DEVICE(dev);
+ 
+   switch (fpi_ssm_get_cur_state(ssm)) {
+-  case SLEEP_STAGE_SWITCH_TO_SLEEP_MODE:
+-    goodix_reset_state(dev);
+-    g_print("SWITCH TO SLEEP MODE\n");
+-    goodix_send_mcu_switch_to_sleep_mode(dev, 20, check_idle, ssm);
+-
+-    break;
+-  case SLEEP_STAGE_SWITCH_TO_SLEEP_MODE_REALTEK:
+-    g_print("SWITCH TO SLEEP MODE REALTEK\n");
+-    goodix_send_mcu_switch_to_sleep_mode_realtek(dev, 0x6c, check_sleep_realtek, ssm);
++  case SLEEP_STAGE_IDLE:
++    g_print("SWITCH TO IDLE MODE\n");
++    goodix_send_mcu_switch_to_idle_mode(dev, 20, check_idle, ssm);
+     break;
+   case SLEEP_STAGE_DEACTIVATE:
+     g_print("Deactivated\n");
+     goodix_reset_state(dev);
+-//    goodix_cancel_receive(dev);
+     GError *error = NULL;
+     goodix_shutdown_tls(dev, &error);
+     goodix55X4_reset_state(FPI_DEVICE_GOODIXTLS55X4(img_dev));
+     fpi_image_device_deactivate_complete(img_dev, error);
+     break;
+-  }  
+-}
+-
+-static void write_sensor_complete(FpDevice *dev, gpointer user_data,
+-                                  GError *error) {
+-  if (error) {
+-    fp_err("failed to scan: %s (code: %d)", error->message, error->code);
+-    return;
+   }
+-  scan_get_img(dev, user_data);
+ }
+ 
+ static void scan_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
+@@ -855,7 +717,7 @@ fpi_device_goodixtls55x4_class_init(FpiDeviceGoodixTls55X4Class *class) {
+   dev_class->full_name = "Goodix TLS Fingerprint Sensor 55X4";
+   dev_class->type = FP_DEVICE_TYPE_USB;
+   dev_class->id_table = id_table;
+-  dev_class->nr_enroll_stages = 10;
++  dev_class->nr_enroll_stages = 3;
+   dev_class->scan_type = FP_SCAN_TYPE_PRESS;
+ 
+   // TODO
+diff --git a/libfprint/drivers/goodixtls/goodix55x4.h b/libfprint/drivers/goodixtls/goodix55x4.h
+index ccbcfaa..7d23424 100644
+--- a/libfprint/drivers/goodixtls/goodix55x4.h
++++ b/libfprint/drivers/goodixtls/goodix55x4.h
+@@ -64,6 +64,7 @@ guint8 goodix_55x4_config[] = {
+ };
+ 
+ static const FpIdEntry id_table[] = {
++    {.vid = 0x27c6, .pid = 0x5584},
+     {.vid = 0x27c6, .pid = 0x55b4},
+     {.vid = 0x27c6, .pid = 0x55a4},
+     {.vid = 0, .pid = 0, .driver_data = 0},
+diff --git a/libfprint/drivers/goodixtls/goodixtls.c b/libfprint/drivers/goodixtls/goodixtls.c
+index 60eccc1..63c470a 100644
+--- a/libfprint/drivers/goodixtls/goodixtls.c
++++ b/libfprint/drivers/goodixtls/goodixtls.c
+@@ -58,22 +58,23 @@ tls_server_psk_server_callback (SSL           *ssl,
+                                 unsigned char *psk,
+                                 unsigned int   max_psk_len)
+ {
+-  if (sizeof (goodix_511_psk_0) > max_psk_len)
++  // 27c6:5584: use the per-device PSK recovered from the owning Windows
++  // installation, loaded from a gitignored local file (see goodix.c).
++  const guint8 *device_psk = goodix_5584_get_psk ();
++
++  if (device_psk == NULL)
+     {
+-      fp_dbg ("Provided PSK R is too long for OpenSSL");
++      fp_err ("no 5584 PSK available, refusing TLS handshake");
+       return 0;
+     }
+-  fp_dbg ("PSK WANTED %d", max_psk_len);
+-  // I don't know why we must use OPENSSL_hexstr2buf but just copying zeros
+-  // doesn't work
+-  const char *buff = "000000000000000000000000000000000000000000000000000000000"
+-                     "0000000";
+-  long len = 0;
+-  unsigned char *key = OPENSSL_hexstr2buf (buff, &len);
+-  memcpy (psk, key, len);
+-  OPENSSL_free (key);
+-
+-  return len;
++  if (32 > max_psk_len)
++    {
++      fp_dbg ("Provided PSK is too long for OpenSSL");
++      return 0;
++    }
++  memcpy (psk, device_psk, 32);
++
++  return 32;
+ }
+ 
+ static SSL_CTX *
+diff --git a/libfprint/sigfm/meson.build b/libfprint/sigfm/meson.build
+index 454d412..76271e1 100644
+--- a/libfprint/sigfm/meson.build
++++ b/libfprint/sigfm/meson.build
+@@ -1,11 +1,22 @@
+-
+ sigfm_sources = ['sigfm.cpp']
+ 
+-opencv = dependency('opencv4', required: true)
+-doctest = dependency('doctest', required: true, version: ['>=2.0.0', '<3.0.0'])
++# Arch now ships opencv 5.x (pkg-config 'opencv5'); older distros use
++# 'opencv4'. Try both.
++opencv = dependency('opencv5', required: false)
++if not opencv.found()
++    opencv = dependency('opencv4', required: false)
++endif
++doctest = dependency('doctest', required: false, version: ['>=2.0.0', '<3.0.0'])
+ 
+-libsigfm = static_library('sigfm',
+-        sigfm_sources,
+-        dependencies: [opencv],
+-)
+-sigfm_tests = executable('sigfm-tests', ['./tests.cpp'], dependencies: [doctest, opencv], link_with: [libsigfm])
++if opencv.found()
++    libsigfm = static_library('sigfm',
++            sigfm_sources,
++            dependencies: [opencv],
++    )
++    if doctest.found()
++        sigfm_tests = executable('sigfm-tests', ['./tests.cpp'], dependencies: [doctest, opencv], link_with: [libsigfm])
++    endif
++else
++    warning('opencv4 not found: building SIGFM stub; SIGFM matching is unavailable')
++    libsigfm = static_library('sigfm', ['sigfm-stub.cpp'])
++endif
+diff --git a/libfprint/sigfm/sigfm-stub.cpp b/libfprint/sigfm/sigfm-stub.cpp
+new file mode 100644
+index 0000000..48696a3
+--- /dev/null
++++ b/libfprint/sigfm/sigfm-stub.cpp
+@@ -0,0 +1,46 @@
++// Minimal SIGFM stub for environments without opencv4/doctest.
++//
++// Satisfies the C ABI declared in sigfm.hpp so libfprint links. Every
++// function reports failure or empty results; SIGFM matching is unavailable.
++// Drivers using FPI_DEVICE_ALGO_NBIS never call into this code.
++
++#include "sigfm.hpp"
++
++#include <cstdlib>
++
++struct SigfmImgInfo {
++    int unused;
++};
++
++SigfmImgInfo* sigfm_extract(const SfmPix* /*pix*/, int /*width*/, int /*height*/) {
++    auto* info = static_cast<SigfmImgInfo*>(std::malloc(sizeof(SigfmImgInfo)));
++    info->unused = 0;
++    return info;
++}
++
++void sigfm_free_info(SigfmImgInfo* info) {
++    std::free(info);
++}
++
++int sigfm_match_score(SigfmImgInfo* /*frame*/, SigfmImgInfo* /*enrolled*/) {
++    return -1;
++}
++
++unsigned char* sigfm_serialize_binary(SigfmImgInfo* /*info*/, int* outlen) {
++    *outlen = 0;
++    return nullptr;
++}
++
++SigfmImgInfo* sigfm_deserialize_binary(const unsigned char* /*bytes*/, int /*len*/) {
++    return nullptr;
++}
++
++int sigfm_keypoints_count(SigfmImgInfo* /*info*/) {
++    return 0;
++}
++
++SigfmImgInfo* sigfm_copy_info(SigfmImgInfo* info) {
++    auto* copy = static_cast<SigfmImgInfo*>(std::malloc(sizeof(SigfmImgInfo)));
++    copy->unused = info->unused;
++    return copy;
++}

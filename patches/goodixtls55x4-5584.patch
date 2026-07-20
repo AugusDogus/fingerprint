@@ -234,15 +234,21 @@ index f28a2d4..5155033 100644
      'verify',
  ]
 diff --git a/libfprint/drivers/goodixtls/goodix.c b/libfprint/drivers/goodixtls/goodix.c
-index 417a37c..0290854 100644
+index 417a37c..da64c3f 100644
 --- a/libfprint/drivers/goodixtls/goodix.c
 +++ b/libfprint/drivers/goodixtls/goodix.c
-@@ -75,6 +75,83 @@ data_to_str (guint8 *data, guint32 length)
+@@ -75,6 +75,91 @@ data_to_str (guint8 *data, guint32 length)
    return string;
  }
  
 +// ---- 27c6:5584 per-device secrets (read from a gitignored local file) ----
++//
++// Resolution order:
++//   1. $GOODIX5584_SECRETS_FILE
++//   2. /etc/goodix5584/psk.hex     (system services such as fprintd)
++//   3. captures/psk.hex relative to the cwd (repo-local tools)
 +
++#define GOODIX_5584_SECRETS_SYSTEM "/etc/goodix5584/psk.hex"
 +#define GOODIX_5584_SECRETS_DEFAULT "captures/psk.hex"
 +
 +static guint8 goodix_5584_psk[32];
@@ -260,6 +266,8 @@ index 417a37c..0290854 100644
 +    return state == 1;
 +
 +  path = g_getenv ("GOODIX5584_SECRETS_FILE");
++  if (!path && g_file_test (GOODIX_5584_SECRETS_SYSTEM, G_FILE_TEST_EXISTS))
++    path = GOODIX_5584_SECRETS_SYSTEM;
 +  if (!path)
 +    path = GOODIX_5584_SECRETS_DEFAULT;
 +

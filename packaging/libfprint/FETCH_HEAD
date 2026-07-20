@@ -1,0 +1,68 @@
+d1ca62a801aa565e67d1a2a47aaa7a33232b7990	not-for-merge	branch '55b4-experimental' of https://github.com/TheWeirdDev/libfprint
+3f13ddc40dced65128e01b2490f03786e9c31c56	not-for-merge	branch 'benzea/add-support-warning-to-website' of https://github.com/TheWeirdDev/libfprint
+c7cab77fc160c66af8eee130953cac069f80284a	not-for-merge	branch 'benzea/add-usb-cancellation-workaround' of https://github.com/TheWeirdDev/libfprint
+07f93d9bfb98e4c7cd36cf55ed80d19c1c5a318d	not-for-merge	branch 'benzea/chunked-spi-transfer' of https://github.com/TheWeirdDev/libfprint
+1528c962fa5129d8c62be367d33c1514365b6822	not-for-merge	branch 'benzea/ci-timeouts' of https://github.com/TheWeirdDev/libfprint
+cb56ddba5bb184b1ee14426a7e6ca654e395a194	not-for-merge	branch 'benzea/deactivate-race-window' of https://github.com/TheWeirdDev/libfprint
+bc3f622b2af9dde4872d2732c67c111d4d176822	not-for-merge	branch 'benzea/fix-egis-crash' of https://github.com/TheWeirdDev/libfprint
+400cacf8671832b26c3ffcc6e09f263ab285ed3e	not-for-merge	branch 'benzea/fix-elan-leak' of https://github.com/TheWeirdDev/libfprint
+8732e2a2134fb96c69955f789468c17ffdfeb034	not-for-merge	branch 'benzea/fix-flatpak' of https://github.com/TheWeirdDev/libfprint
+d3f99bfb40d2f7efc278fc953408a3c2ed3fafd9	not-for-merge	branch 'benzea/fix-upek_proto-licnese' of https://github.com/TheWeirdDev/libfprint
+b137807420ee91d53cc0651318865a472991ba25	not-for-merge	branch 'benzea/fix-upekts' of https://github.com/TheWeirdDev/libfprint
+e1fdc7b01b45c8678e86b8518f9178844a0bb303	not-for-merge	branch 'benzea/fix-uru4000' of https://github.com/TheWeirdDev/libfprint
+5cbc05dbc7f2a96baa91e289e474bd39b0a760f4	not-for-merge	branch 'benzea/goodix-remove-cancellable' of https://github.com/TheWeirdDev/libfprint
+f404a69b73eaba72e5e0d181bec1fcdff127c5e7	not-for-merge	branch 'benzea/improve-image-device-tests' of https://github.com/TheWeirdDev/libfprint
+788fd9ca7af353942848f4d920b88a019e0987c3	not-for-merge	branch 'benzea/misc-fixes' of https://github.com/TheWeirdDev/libfprint
+ec2748dcbdd8146ece353de8b896e6a876bca586	not-for-merge	branch 'benzea/pcap-replay-test' of https://github.com/TheWeirdDev/libfprint
+615c37084225e8faaf187c5b2ef9f9250063f504	not-for-merge	branch 'benzea/vfs301-userdata' of https://github.com/TheWeirdDev/libfprint
+5b92de7c944baa9364268e80e5f07bf0d1e4557f	not-for-merge	branch 'feat-5110-images' of https://github.com/TheWeirdDev/libfprint
+e0f081c6e3432990f0f3c10fe80f486e8d496789	not-for-merge	branch 'feature/sdcp' of https://github.com/TheWeirdDev/libfprint
+c1ff5ae0e85efee3e5b7935ec8cd9cefd2a994ab	not-for-merge	branch 'feature/suspend-resume' of https://github.com/TheWeirdDev/libfprint
+823f2c1067a27deae4153dd9ece6ce24bedc0680	not-for-merge	branch 'libfprint-1-0' of https://github.com/TheWeirdDev/libfprint
+bd99f865d8bf2e0f3f7e9e48fd6826fd9815f4cc	not-for-merge	branch 'libfprint-1-90' of https://github.com/TheWeirdDev/libfprint
+6e3ff3a5ec5163984ee836f4ecbde2132356fe65	not-for-merge	branch 'master' of https://github.com/TheWeirdDev/libfprint
+12b84f5762175859b7f8bf45f48f9639f4b83cca	not-for-merge	branch 'mincrmatt12/elan-spi-new' of https://github.com/TheWeirdDev/libfprint
+f47011f2ee975f410855475639e13aa007ee70d3	not-for-merge	branch 'openssl-init' of https://github.com/TheWeirdDev/libfprint
+88cd932203a109b8a3a062cac8ce8d32ab70e6ef	not-for-merge	branch 'vincenth/simplify-synaptics-driver' of https://github.com/TheWeirdDev/libfprint
+65bd095ea9fba0126b4cb3f641c57b13e5be99a7	not-for-merge	branch 'wip/benzea/add-delete-finger' of https://github.com/TheWeirdDev/libfprint
+197edac702b26ffa90f79be9a492313de2d95c5c	not-for-merge	branch 'wip/hadess/driver-id-removal' of https://github.com/TheWeirdDev/libfprint
+9b3e9d9e8cee8385175800f4385ec437337590d5	not-for-merge	branch 'wip/hadess/elan-fix-leak' of https://github.com/TheWeirdDev/libfprint
+35e8deba37deb0060e28460b8f6cf35a89353942	not-for-merge	branch 'wip/hadess/new-elan' of https://github.com/TheWeirdDev/libfprint
+e2f06e8f1e6be6edf8c529acfea7ea98b7c42c49	not-for-merge	branch 'wip/hadess/remove-num_stripes' of https://github.com/TheWeirdDev/libfprint
+0ec067ecb134d70af6b7832bfd24346f7bbbe31c	not-for-merge	branch 'wip/hadess/test-data' of https://github.com/TheWeirdDev/libfprint
+8d871751f6ab6d44d439383414822bc765845f7d	not-for-merge	branch 'wip/hadess/virtual-nonimgdev' of https://github.com/TheWeirdDev/libfprint
+f32eab8d9c63dd2ef3217b942d66a698e689b4c3	not-for-merge	'refs/pull/1/head' of https://github.com/TheWeirdDev/libfprint
+b62173cdfe5097bdcb42b37d9448ca5bc3c1afbf	not-for-merge	'refs/pull/2/head' of https://github.com/TheWeirdDev/libfprint
+6745eed7853556710ab60716390e8073bb662c37	not-for-merge	'refs/pull/2/merge' of https://github.com/TheWeirdDev/libfprint
+0d1081f4343389248cba2bc7918790c8c4aa025b	not-for-merge	'refs/pull/3/head' of https://github.com/TheWeirdDev/libfprint
+ddfb4aeb9dabe0efd38784f944725f8cca1b5a64	not-for-merge	'refs/pull/3/merge' of https://github.com/TheWeirdDev/libfprint
+72ee8cdd3601ac0aff3eb63bc6f7e139211bc2ea	not-for-merge	'refs/pull/4/head' of https://github.com/TheWeirdDev/libfprint
+87d1c8d410e137c68a0b2812ea0b45e3d1abd063	not-for-merge	'refs/pull/4/merge' of https://github.com/TheWeirdDev/libfprint
+941b2bdc9e20597d1cd87f3dd04d829fffefc92d	not-for-merge	'refs/pull/5/head' of https://github.com/TheWeirdDev/libfprint
+28322c9b93cac665fe65fcc84f4f8db1719ed883	not-for-merge	'refs/pull/5/merge' of https://github.com/TheWeirdDev/libfprint
+6710b7a140a64233ba00a6b222c028ead2d7348e	not-for-merge	tag 'V_0_2_0' of https://github.com/TheWeirdDev/libfprint
+285a66ef67453be0416bdc44febc7b2e0d1ca70f	not-for-merge	tag 'V_0_6_0' of https://github.com/TheWeirdDev/libfprint
+5d98101bb6ea1f9aea734117705834c667037266	not-for-merge	tag 'V_0_7_0' of https://github.com/TheWeirdDev/libfprint
+570ba7ad023d2a3502369888cd6df2af8c6656fe	not-for-merge	tag 'V_0_8_0' of https://github.com/TheWeirdDev/libfprint
+d51b012440fad48cd340f7c1ff683506329b5439	not-for-merge	tag 'V_0_8_1' of https://github.com/TheWeirdDev/libfprint
+a9fca68901dd83f65f2036a404da65ac680207e2	not-for-merge	tag 'V_0_8_2' of https://github.com/TheWeirdDev/libfprint
+39b6fdf4ce777ffc91ee670c7d2491ee69f592eb	not-for-merge	tag 'V_0_99_0' of https://github.com/TheWeirdDev/libfprint
+646685cd7fad5bca0f64c2d4253e8272b3b824cc	not-for-merge	tag 'V_1_0' of https://github.com/TheWeirdDev/libfprint
+0ad86de20084f05a05b8e3b02fa13ba8b6cdaf1d	not-for-merge	tag 'V_1_90_0' of https://github.com/TheWeirdDev/libfprint
+c1c75b32b38a6feb82988c42ec5de37b9bad0244	not-for-merge	tag 'V_1_90_0+tod1' of https://github.com/TheWeirdDev/libfprint
+174aa2c0917be87014849e4b72341f825f3de327	not-for-merge	tag 'show' of https://github.com/TheWeirdDev/libfprint
+8205ae42877b87a794531961420e68d893730219	not-for-merge	tag 'v1.90.0+tod1' of https://github.com/TheWeirdDev/libfprint
+04e0a3729c7295d256cc7c0222f023e91bbbef02	not-for-merge	tag 'v1.90.1' of https://github.com/TheWeirdDev/libfprint
+4059c5de5b5a17983ddbb82e076e76f606b0de4b	not-for-merge	tag 'v1.90.1+tod1' of https://github.com/TheWeirdDev/libfprint
+398990445b798a65910d857fcd89e4d2a785396a	not-for-merge	tag 'v1.90.2' of https://github.com/TheWeirdDev/libfprint
+cdbb17967f185134f1a0bb3610b020b7a06eb445	not-for-merge	tag 'v1.90.2+tod1' of https://github.com/TheWeirdDev/libfprint
+3daa3d5c7d430b6ae1124daaf30887b543695161	not-for-merge	tag 'v1.90.3' of https://github.com/TheWeirdDev/libfprint
+a315a3a0a3aa2eb283f99f875ef446455429db18	not-for-merge	tag 'v1.90.3+tod1' of https://github.com/TheWeirdDev/libfprint
+9d2aac0d6e76173de6d9c6b4935f033ed5204349	not-for-merge	tag 'v1.90.4' of https://github.com/TheWeirdDev/libfprint
+45c60263f13cbff1f904b3d6a03261793e0a784c	not-for-merge	tag 'v1.90.5' of https://github.com/TheWeirdDev/libfprint
+9800b9cb3b1fcb017aa5d0f8398c72ce78f9b3db	not-for-merge	tag 'v1.90.6' of https://github.com/TheWeirdDev/libfprint
+321ccab2ba499f5fb32c3a475440317a5c15b4f2	not-for-merge	tag 'v1.90.7' of https://github.com/TheWeirdDev/libfprint
+fa230d10624cdcbc7ba964e6a8693d25db9ad725	not-for-merge	tag 'v_0_3_0' of https://github.com/TheWeirdDev/libfprint
+53042cac0ec0cbb376ee9a3f73c9d826a97c4233	not-for-merge	tag 'v_0_4_0' of https://github.com/TheWeirdDev/libfprint
+5962bd0f93c9a919c0db0ec9c8d6636aa4d76eb4	not-for-merge	tag 'v_0_5_0' of https://github.com/TheWeirdDev/libfprint
+c75a168fd092dde9aad5eb5f813c7d55fa158f11	not-for-merge	tag 'v_0_5_1' of https://github.com/TheWeirdDev/libfprint

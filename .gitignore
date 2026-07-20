@@ -2,6 +2,9 @@
 /captures/
 /.venv/
 /libfprint/
+/packaging/src/
+/packaging/pkg/
+/packaging/*.pkg.tar.zst
 /windows-drivers/
 /session-ses_1415.md
 /test-storage.variant

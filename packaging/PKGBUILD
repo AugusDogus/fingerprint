@@ -1,0 +1,54 @@
+# Maintainer: local build for the Goodix 27c6:5584 reverse-engineering project
+#
+# Patched libfprint with the goodixtls55x4 driver adapted for the
+# Goodix 27c6:5584 fingerprint reader (see patches/README.md in this
+# repository for the full change list).
+#
+# Build and install:
+#   cd packaging && makepkg -si
+#
+# Remove and restore stock libfprint:
+#   sudo pacman -R libfprint-goodix5584
+#   sudo pacman -S --asdeps libfprint    # if fprintd is installed
+
+pkgname=libfprint-goodix5584
+_pkgbase=libfprint
+_commit=d1ca62a801aa565e67d1a2a47aaa7a33232b7990
+pkgver=1.94.6+r5584.$(date +%Y%m%d)
+pkgrel=1
+pkgdesc="libfprint with goodixtls55x4 driver for Goodix 27c6:5584"
+arch=(x86_64)
+url="https://github.com/TheWeirdDev/libfprint"
+license=(LGPL-2.1-or-later)
+depends=(glib2 libgusb openssl cairo)
+makedepends=(meson ninja git gcc pkg-config opencv doctest)
+provides=(libfprint libfprint-2.so)
+conflicts=(libfprint)
+source=("git+https://github.com/TheWeirdDev/libfprint.git#commit=${_commit}"
+        "goodixtls55x4-5584.patch"
+        "70-goodix-5584.rules")
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+
+prepare() {
+  cd "${_pkgbase}"
+  git apply "${srcdir}/goodixtls55x4-5584.patch"
+}
+
+build() {
+  meson setup "${_pkgbase}/build" "${_pkgbase}" \
+    --prefix=/usr \
+    -Ddrivers=goodixtls55x4 \
+    -Ddoc=false \
+    -Dintrospection=false \
+    -Dudev_rules=enabled \
+    -Dudev_rules_dir=/usr/lib/udev/rules.d \
+    -Dudev_hwdb=disabled \
+    -Dinstalled-tests=false
+  ninja -C "${_pkgbase}/build"
+}
+
+package() {
+  DESTDIR="${pkgdir}" ninja -C "${_pkgbase}/build" install
+  install -Dm644 "${srcdir}/70-goodix-5584.rules" \
+    "${pkgdir}/usr/lib/udev/rules.d/70-goodix-5584.rules"
+}
