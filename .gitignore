@@ -4,6 +4,7 @@
 /libfprint/
 /packaging/src/
 /packaging/pkg/
+/packaging/libfprint/
 /packaging/*.pkg.tar.zst
 /windows-drivers/
 /session-ses_1415.md
