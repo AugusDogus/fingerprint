@@ -393,6 +393,91 @@ up to 10 times through the TLS handshake/status path. On success it logs
 success. On handshake-in-progress statuses it retries; other errors fail the
 logic start.
 
+## Firmware 10042 vs goodix-fp-dump 55x4 (offline comparison, 2026-07-20)
+
+Compared the capture against the public `goodix-fp-dump` `driver_55x4.py` /
+`goodix.py` / `tool.py` (github.com/goodix-fp-linux-dev/goodix-fp-dump).
+That project targets `GF3268_RTSEC_APP_10041`; its `VALID_FIRMWARE` regex
+(`GF32[0-9]{2}_RTSEC_APP_100[0-9]{2}`) matches this device's 10042, and the
+IAP string matches exactly (`MILAN_RTSEC_IAP_10027`).
+
+Verified identical between the Windows capture and the public implementation:
+
+- All command IDs seen in the capture (`00 20 36 70 82 90 a2 a6 a8 d0 e0 e4
+  f6`) exist in the public table with the same roles.
+- `a2` payload `05 14` = `reset(reset_sensor=True, soft_reset_mcu=False,
+  sleep_time=20)`, bit-for-bit the public encoding.
+- The `90` UPLOAD_CONFIG_MCU payload equals the public `DEVICE_CONFIG`
+  constant byte-for-byte (256 bytes).
+- `82` READ_SENSOR_REGISTER at `0x0000` len 4 (chip ID; response `0ca10022`)
+  and at `0x0082` len 2, same as the public `run_driver` flow. Difference:
+  the 10042 request carries a trailing `00` byte (5-byte payload) that the
+  public encoder does not emit.
+- Post-TLS pipeline `90, 36, 20, 36, 70, 82, 20, 36` is exactly the public
+  `run_driver` sequence minus its sleep/finger-wait phase.
+- `b2` image record = 9-byte Goodix prefix + one TLS 1.2 application-data
+  record. Sizes line up with AES-128-CBC-SHA256: 14,320-byte fragment =
+  16-byte explicit IV + (14,256-byte image + 4-byte trailer + 32-byte HMAC +
+  padding). 14,256 bytes = 88 x 108 pixels x 12 bpp; the public
+  `tool.decode_image` unpacking (4 pixels per 6 bytes) applies.
+- TLS roles: the device is the TLS *client* (sends ClientHello offering
+  `0x00ae` TLS_PSK_WITH_AES_128_CBC_SHA256 plus the `0x00ff` SCSV), the host
+  runs the server (public tool uses `openssl s_server -nocert -psk`).
+  Identity in the device ClientKeyExchange is `Client_identity`.
+
+## PSK Provisioning Analysis (2026-07-20)
+
+The `e0`/`e4` PSK storage is TLV based. Capture decoding shows:
+
+- `e4` request payload: `flags(4 LE) + 00 00 00 00`. Response payload:
+  `status(1) + flags(4 LE) + length(4 LE) + data`.
+- TLV `0xbb010002` (324 bytes): a Windows DPAPI blob. It starts with the
+  DPAPI provider GUID `d08c9ddf-0115-d111-8c7a-00c04fc297eb`, i.e. the PSK
+  encrypted by the Windows installation that provisioned the device.
+- TLV `0xbb010003` (96 bytes): the device-side "white box" PSK encoding.
+  The first 16 bytes match the public `PSK_WHITE_BOX` constant; the
+  remaining 80 bytes differ, so this device has its own unique PSK.
+- TLV `0xbb020007` (32 bytes): a PMK/PSK hash, `071b91b1...` on this device,
+  different from the public `PMK_HASH` (`81b8ff49...`). The hash
+  construction is unknown: neither `sha256((len16be || psk) * 2)` nor the
+  firmware-HMAC chain from the public updater reproduces the public hash.
+- Windows wrote both PSK TLVs once in the cold session (single `e0` frame
+  carrying both TLVs), then only read them in the warm session. The hash was
+  identical in both sessions, so the PSK was stable after that write.
+
+Consequence: the public tool's `write_psk` (provisioning its known PSK)
+would overwrite this device's pairing — that is the destructive step to
+avoid. The non-destructive route to a Linux TLS session is to read TLV
+`0xbb010002` (read-only) and unseal the DPAPI blob inside the owning Windows
+VM, then run the host-side TLS server with that PSK.
+
+## ACK Status Byte Observation
+
+`b0` ACK payloads are `cmd status`. Status `0x03` appears on a cold device
+(including the live Linux probe on 2026-07-20); status `0x01` dominates the
+post-initialization warm session. The public decoder treats bit 1 as a
+success flag, which does not fit this device (successful commands show both
+values). Exact semantics unknown; treat it as a device-state byte.
+
+## GF3208 vs GF3268 Version String
+
+- Cold device (capture session 1, and the live Linux probe on 2026-07-20):
+  `GF3208_RTSEC_APP_10042`, ACK status `0x03`.
+- After full Windows initialization (capture session 2):
+  `GF3268_RTSEC_APP_10042`, ACK status `0x01`.
+- TLS ran successfully in session 1 while the string still read GF3208, so
+  the difference does not gate TLS. Which command flips the string (reset
+  `a2`, config `90`, or the PnP restart) is unknown.
+
+## New Tooling (2026-07-20)
+
+- `tools/rtsec_codec.py`: pure codec (outer pack, inner frame, ACK, PSK TLV,
+  TLS record/handshake, `b2` image record, 12-bit image unpacking).
+- `tools/test_rtsec_codec.py`: 16 unit tests against capture-confirmed byte
+  strings. Run: `cd tools && python3 -m unittest test_rtsec_codec`.
+- `tools/replay_capture.py`: semantic transcript + checksum validation of a
+  usbmon capture. Current result: 145 logical frames, 0 validation failures.
+
 ## Realtek Receive Parsing
 
 The Realtek receive/parser path starts through the table rooted at

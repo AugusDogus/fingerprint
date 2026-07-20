@@ -17,7 +17,14 @@ Current findings:
 - Static strings show MCU commands, firmware update paths, TLS-PSK, and SGX/enclave support.
 - A Windows usbmon capture recovered the complete RTSEC transport framing.
 - Linux can now send the non-destructive NOP/version startup sequence and read
-  firmware version `GF3268_RTSEC_APP_10042` successfully.
+  firmware version `GF3268_RTSEC_APP_10042` successfully. (A cold device
+  reports `GF3208_RTSEC_APP_10042`; see docs/protocol-notes.md.)
+- The Windows PSK provisioning is decoded: the device stores a DPAPI-encrypted
+  PSK blob (TLV `0xbb010002`), a white-box PSK encoding (TLV `0xbb010003`),
+  and a PSK hash (TLV `0xbb020007`). The device PSK is unique, not the public
+  goodix-fp-dump one.
+- Passive codec, unit tests, and a capture-replay transcript tool live in
+  `tools/` (`rtsec_codec.py`, `test_rtsec_codec.py`, `replay_capture.py`).
 - The traced Windows reset retry path is not USB: it toggles an ACPI GPIO
   Resource Hub target via IOCTL `0x480004`. The current unit appears as an
   external USB device, so this may be shared code for other integrated variants.
