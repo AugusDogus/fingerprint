@@ -428,6 +428,31 @@ New device-behavior findings:
   (`0d 01 80 a7 80 be 80 bb 80 aa 80 ad 80 ca 80 c0 80 b1 80 a3 80 bd
   80 b8 80 a9`) in the warm session; the driver patch uses the warm
   values.
+- FDT-down (0x32) is the finger-capture mode: its data reply arrives
+  when a finger is detected (hardware finger-detect), and frames
+  captured in this mode are dramatically cleaner than FDT-mode frames
+  (binarized ridges are continuous and well-separated).
+- Frame geometry confirmed: 108 wide x 88 tall; the public 12-bit
+  unpacking (4 pixels per 6 bytes) is correct. Rendered 88x108 the
+  baseline shows wrap striping; 108x88 matches the Windows capture's
+  baseline character.
+
+## Matching: NBIS vs SIGFM (2026-07-20)
+
+NBIS/mindtct is a poor match for this sensor's small (108x88), smooth
+frames: real finger frames scored 1-5 minutiae (threshold 10), while
+reference prints scored 90-100. Binarization quality is excellent, so
+the images are fine; the detector just finds few endings/bifurcations
+on arch-flank areas, and score-inflating tricks (2x upscale) inflate
+no-finger noise equally (36+ false minutiae). ppmm has no effect.
+
+The community answer for this sensor family is SIGFM (OpenCV keypoint
+matching), used by the goodixtls fork. With opencv installed the
+driver uses `FPI_DEVICE_ALGO_SIGFM`; the full loop was validated on the
+live device: `examples/enroll` (3 stages, exit 0) followed by
+`examples/verify` printed `MATCH!`. Arch note: opencv 5.x registers
+pkg-config module `opencv5`, not `opencv4`; `libfprint/sigfm/meson.build`
+in the patch tries both.
 
 ## Linux TLS Session Established (2026-07-19)
 

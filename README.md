@@ -31,9 +31,10 @@ Current findings:
   URBs are silently ignored by the MCU.
 - A working libfprint driver exists as `patches/goodixtls55x4-5584.patch`
   (base: TheWeirdDev/libfprint `55b4-experimental`). It completes activation,
-  the TLS-PSK session, live image capture, and NBIS minutiae detection
-  (`MINUTIAE_COUNT=10` on a live finger scan). Image quality still needs
-  tuning; see `patches/README.md`.
+  the TLS-PSK session, live image capture, and matching: `examples/enroll`
+  + `examples/verify` passed on the live device (`MATCH!`). Matching uses
+  SIGFM (OpenCV keypoints); NBIS/mindtct scores too few minutiae on this
+  sensor. See `patches/README.md`.
 - Passive codec, unit tests, capture replay, offline TLS decryption, and the
   live session tooling live in `tools/` (`rtsec_codec.py`,
   `test_rtsec_codec.py`, `replay_capture.py`, `tls_capture_decrypt.py`,

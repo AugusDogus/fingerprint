@@ -56,6 +56,23 @@ LD_LIBRARY_PATH=libfprint/build/libfprint \
   with NOP keepalives while waiting for the finger (the MCU drops off the
   bus after several idle seconds).
 - FDT baseline values set to the per-unit values captured from Windows.
-- Uses NBIS/mindtct matching; SIGFM is replaced by a stub when opencv4 is
-  unavailable.
+- Uses SIGFM (OpenCV keypoints) matching — NBIS/mindtct scores too few
+  minutiae on this small, smooth sensor (real frames 1-5, reference
+  prints 90+). The SIGFM stub is only used when opencv is unavailable;
+  on Arch, opencv 5.x is found via pkg-config `opencv5`.
 - Adds the `capture-minutiae` example used for the goal proof.
+
+## Enroll / verify test
+
+```sh
+echo 6 | LD_LIBRARY_PATH=libfprint/build/libfprint \
+    libfprint/build/examples/enroll    # 6 = right index
+echo 6 | LD_LIBRARY_PATH=libfprint/build/libfprint \
+    libfprint/build/examples/verify
+```
+
+The enroll example asks for the finger number on stdin (6 = right index),
+captures `nr_enroll_stages` frames (3 in this patch), and stores the print
+in `./test-storage.variant` (gitignored — biometric template, never commit).
+Verify prints `MATCH!` on success; this was confirmed on the live device
+on 2026-07-20.

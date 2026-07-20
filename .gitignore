@@ -4,5 +4,6 @@
 /libfprint/
 /windows-drivers/
 /session-ses_1415.md
+/test-storage.variant
 __pycache__/
 *.py[cod]
