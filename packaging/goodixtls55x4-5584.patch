@@ -346,7 +346,7 @@ index d2f79a0..224963b 100644
  
  void goodix_receive_done (FpDevice *dev,
 diff --git a/libfprint/drivers/goodixtls/goodix55x4.c b/libfprint/drivers/goodixtls/goodix55x4.c
-index 20db582..47c2414 100644
+index 20db582..b014792 100644
 --- a/libfprint/drivers/goodixtls/goodix55x4.c
 +++ b/libfprint/drivers/goodixtls/goodix55x4.c
 @@ -62,6 +62,9 @@ struct _FpiDeviceGoodixTls55X4 {
@@ -837,15 +837,6 @@ index 20db582..47c2414 100644
  }
  
  static void scan_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
-@@ -855,7 +721,7 @@ fpi_device_goodixtls55x4_class_init(FpiDeviceGoodixTls55X4Class *class) {
-   dev_class->full_name = "Goodix TLS Fingerprint Sensor 55X4";
-   dev_class->type = FP_DEVICE_TYPE_USB;
-   dev_class->id_table = id_table;
--  dev_class->nr_enroll_stages = 10;
-+  dev_class->nr_enroll_stages = 3;
-   dev_class->scan_type = FP_SCAN_TYPE_PRESS;
- 
-   // TODO
 diff --git a/libfprint/drivers/goodixtls/goodix55x4.h b/libfprint/drivers/goodixtls/goodix55x4.h
 index ccbcfaa..7d23424 100644
 --- a/libfprint/drivers/goodixtls/goodix55x4.h

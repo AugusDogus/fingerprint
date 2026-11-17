@@ -72,7 +72,7 @@ echo 6 | LD_LIBRARY_PATH=libfprint/build/libfprint \
 ```
 
 The enroll example asks for the finger number on stdin (6 = right index),
-captures `nr_enroll_stages` frames (3 in this patch), and stores the print
+captures `nr_enroll_stages` frames (10, the upstream default), and stores the print
 in `./test-storage.variant` (gitignored — biometric template, never commit).
 Verify prints `MATCH!` on success; this was confirmed on the live device
 on 2026-07-20.
