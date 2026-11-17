@@ -148,3 +148,7 @@ Full details in [docs/protocol-notes.md](docs/protocol-notes.md).
 (from October 2026) also supports `27c6:5584`, with Goodix's own matcher. It
 requires overwriting the reader's pairing key with zeros, after which Windows
 no longer pairs with it. This driver keeps the Windows key.
+
+## License
+
+LGPL-2.1-or-later, the same as libfprint. See [LICENSE](LICENSE).
