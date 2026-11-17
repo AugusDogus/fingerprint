@@ -346,10 +346,10 @@ index d2f79a0..224963b 100644
  
  void goodix_receive_done (FpDevice *dev,
 diff --git a/libfprint/drivers/goodixtls/goodix55x4.c b/libfprint/drivers/goodixtls/goodix55x4.c
-index 20db582..b014792 100644
+index 20db582..9699fbb 100644
 --- a/libfprint/drivers/goodixtls/goodix55x4.c
 +++ b/libfprint/drivers/goodixtls/goodix55x4.c
-@@ -62,6 +62,9 @@ struct _FpiDeviceGoodixTls55X4 {
+@@ -62,7 +62,26 @@ struct _FpiDeviceGoodixTls55X4 {
  
    GSList *frames;
  
@@ -357,9 +357,26 @@ index 20db582..b014792 100644
 +  guint wait_ticks;
 +
    Goodix55X4Pix empty_img[GOODIX55X4_FRAME_SIZE];
++
++  // Finger presence is judged from frames, not the FDT interrupt: the FDT-down
++  // trigger can fire with no finger, and there is no usable FDT-up event.
++  // capture_img holds the best (firmest contact) frame of the current touch;
++  // finger_diff is its mean difference from empty_img.
++  Goodix55X4Pix capture_img[GOODIX55X4_FRAME_SIZE];
++  double finger_diff;
++  // Iteration counter shared by the calibration, settle and finger-off loops.
++  guint polls;
++  // empty_img was confirmed empty by a finger-on -> finger-off transition, so
++  // the next calibration can be checked against it.
++  gboolean have_empty;
++  // Set once libfprint asks us to deactivate, so polling loops stop.
++  gboolean deactivating;
++  // Scan state a pending poll timeout jumps back to.
++  int poll_jump_state;
  };
  
-@@ -77,7 +80,6 @@ static void goodix55X4_reset_state(FpiDeviceGoodixTls55X4 *self) {}
+ G_DECLARE_FINAL_TYPE(FpiDeviceGoodixTls55X4, fpi_device_goodixtls55x4, FPI,
+@@ -77,7 +96,6 @@ static void goodix55X4_reset_state(FpiDeviceGoodixTls55X4 *self) {}
  
  enum activate_states {
    ACTIVATE_READ_AND_NOP,
@@ -367,7 +384,7 @@ index 20db582..b014792 100644
    ACTIVATE_NOP,
    ACTIVATE_CHECK_FW_VER,
    ACTIVATE_CHECK_PSK,
-@@ -106,7 +108,11 @@ static void check_firmware_version(FpDevice *dev, gchar *firmware,
+@@ -106,7 +124,11 @@ static void check_firmware_version(FpDevice *dev, gchar *firmware,
    fp_dbg("Device firmware: \"%s\"", firmware);
    g_print("%s\n", firmware);
  
@@ -380,7 +397,7 @@ index 20db582..b014792 100644
      g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
                  "Invalid device firmware: \"%s\"", firmware);
      fpi_ssm_mark_failed(user_data, error);
-@@ -169,14 +175,24 @@ static void check_preset_psk_read(FpDevice *dev, gboolean success,
+@@ -169,14 +191,24 @@ static void check_preset_psk_read(FpDevice *dev, gboolean success,
      return;
    }
  
@@ -407,7 +424,7 @@ index 20db582..b014792 100644
      g_set_error(&error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
                  "Invalid device PSK: 0x%s", psk_str);
      fpi_ssm_mark_failed(user_data, error);
-@@ -193,22 +209,6 @@ static void check_idle(FpDevice *dev, gpointer user_data, GError *err) {
+@@ -193,22 +225,6 @@ static void check_idle(FpDevice *dev, gpointer user_data, GError *err) {
    }
    fpi_ssm_next_state(user_data);
  }
@@ -430,7 +447,7 @@ index 20db582..b014792 100644
  static void check_config_upload(FpDevice *dev, gboolean success,
                                  gpointer user_data, GError *error) {
    if (error) {
-@@ -221,31 +221,6 @@ static void check_config_upload(FpDevice *dev, gboolean success,
+@@ -221,31 +237,6 @@ static void check_config_upload(FpDevice *dev, gboolean success,
      fpi_ssm_next_state(user_data);
    }
  }
@@ -462,7 +479,7 @@ index 20db582..b014792 100644
  
  static void activate_run_state(FpiSsm *ssm, FpDevice *dev) {
  
-@@ -258,11 +233,6 @@ static void activate_run_state(FpiSsm *ssm, FpDevice *dev) {
+@@ -258,11 +249,6 @@ static void activate_run_state(FpiSsm *ssm, FpDevice *dev) {
      goodix_send_nop(dev, check_none, ssm);
      break;
  
@@ -474,7 +491,7 @@ index 20db582..b014792 100644
    case ACTIVATE_NOP:
      g_print("NO OP\n");
      goodix_send_nop(dev, check_none, ssm);
-@@ -338,23 +308,24 @@ static void activate_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
+@@ -338,23 +324,28 @@ static void activate_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
  
  // ---- SCAN SECTION START ----
  
@@ -498,7 +515,11 @@ index 20db582..b014792 100644
 -//  SCAN_STAGE_SWITCH_TO_SLEEP_MODE,
 -//  SCAN_STAGE_SWITCH_TO_SLEEP_MODE_REALTEK,
 -  SCAN_STAGE_SWITCH_TO_FDT_DONE,
++  SCAN_STAGE_SETTLE_FDT_MODE,
++  SCAN_STAGE_SETTLE_READ,
++  SCAN_STAGE_REPORT_IMG,
 +  SCAN_STAGE_FDT_MODE2,
++  SCAN_STAGE_OFF_READ,
 +  SCAN_STAGE_DONE,
    SCAN_STAGE_NUM,
  };
@@ -510,7 +531,7 @@ index 20db582..b014792 100644
    SLEEP_STAGE_DEACTIVATE,
    SLEEP_STAGE_NUM,
  };
-@@ -371,15 +342,6 @@ static void check_none_cmd(FpDevice *dev, guint8 *data, guint16 len,
+@@ -371,15 +362,6 @@ static void check_none_cmd(FpDevice *dev, guint8 *data, guint16 len,
    fpi_ssm_next_state(ssm);
  }
  
@@ -526,7 +547,7 @@ index 20db582..b014792 100644
  static void decode_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
                           const guint8 *raw_frame) {
  
-@@ -400,25 +362,6 @@ static void decode_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
+@@ -400,25 +382,6 @@ static void decode_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
      }
    }
  }
@@ -552,7 +573,7 @@ index 20db582..b014792 100644
  /**
   * @brief Squashes the 12 bit pixels of a raw frame into the 4 bit pixels used
   * by libfprint.
-@@ -480,28 +423,6 @@ postprocess_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
+@@ -480,72 +443,103 @@ postprocess_frame(Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
    return sum != 0;
  }
  
@@ -570,73 +591,141 @@ index 20db582..b014792 100644
 -  squash_frame_linear(raw_frame, frame->data);
 -
 -  *(info->frames) = g_slist_append(*(info->frames), frame);
--}
--
++// Finger presence from frame contents. Measured on this unit: an empty sensor
++// stays within a mean diff of ~10 from the empty baseline, a finger gives
++// 450-930. Anything at or above FINGER_DIFF counts as a finger.
++#define GOODIX55X4_FINGER_DIFF 100.0
++#define GOODIX55X4_POLL_MS 100
++// Extra frames read after the FDT trigger; the firmest contact is kept,
++// because the trigger frame is often taken at first (light) contact.
++#define GOODIX55X4_SETTLE_READS 2
++// Polling caps (each poll ~160 ms) so a misjudged frame can never wedge the
++// device: ~8 s for a lingering finger, ~3 s before trusting a new baseline.
++#define GOODIX55X4_OFF_MAX_POLLS 50
++#define GOODIX55X4_CAL_MAX_POLLS 20
++
++// Mean absolute difference between a decoded frame and the empty baseline.
++static double frame_baseline_diff(const Goodix55X4Pix *frame,
++                                  const Goodix55X4Pix *background) {
++  guint64 sum = 0;
++  for (int i = 0; i != GOODIX55X4_FRAME_SIZE; ++i)
++    sum += ABS((int)frame[i] - (int)background[i]);
++  return (double)sum / GOODIX55X4_FRAME_SIZE;
++}
++
++static void poll_jump(FpDevice *dev, gpointer ssm) {
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  if (self->deactivating) {
++    fpi_ssm_mark_completed(ssm);
++    return;
++  }
++  fpi_ssm_jump_to_state(ssm, self->poll_jump_state);
+ }
+ 
 -static void save_frame(FpiDeviceGoodixTls55X4 *self, guint8 *raw) {
 -  Goodix55X4Pix *frame = malloc(GOODIX55X4_FRAME_SIZE * sizeof(Goodix55X4Pix));
 -  decode_frame(frame, raw);
 -  self->frames = g_slist_append(self->frames, frame);
--}
--
++// Re-enter scan state `state` after GOODIX55X4_POLL_MS, unless deactivating.
++static void poll_later(FpDevice *dev, FpiSsm *ssm, int state) {
++  FPI_DEVICE_GOODIXTLS55X4(dev)->poll_jump_state = state;
++  fpi_device_add_timeout(dev, GOODIX55X4_POLL_MS, poll_jump, ssm, NULL);
+ }
+ 
++// First frame after the FDT-down trigger.
  static void scan_on_read_img(FpDevice *dev, guint8 *data, guint16 len,
                               gpointer ssm, GError *err) {
-   g_print("SCAN_ON_READ_IMG\n");
-@@ -510,42 +431,22 @@ static void scan_on_read_img(FpDevice *dev, guint8 *data, guint16 len,
+-  g_print("SCAN_ON_READ_IMG\n");
+   if (err) {
+     fpi_ssm_mark_failed(ssm, err);
      return;
    }
- 
-+  // 27c6:5584: single press frame, subtracted against the calibration
-+  // baseline captured at SCAN_STAGE_CAL_IMG.
+-
    FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
 -  save_frame(self, data);
 -  if (g_slist_length(self->frames) <= GOODIX55X4_CAP_FRAMES) {
 -    fpi_ssm_jump_to_state(ssm, SCAN_STAGE_SWITCH_TO_FDT_MODE);
 -  } else {
 -    GSList *raw_frames = g_slist_nth(self->frames, 1);
--
+ 
 -    FpImageDevice *img_dev = FP_IMAGE_DEVICE(dev);
 -    struct fpi_frame_asmbl_ctx assembly_ctx;
 -    assembly_ctx.frame_width = GOODIX55X4_WIDTH;
 -    assembly_ctx.frame_height = GOODIX55X4_HEIGHT;
 -    assembly_ctx.image_width = GOODIX55X4_WIDTH * 1;
 -    assembly_ctx.get_pixel = get_pix;
--
++  decode_frame(self->capture_img, data);
++  const double diff = frame_baseline_diff(self->capture_img, self->empty_img);
++  if (diff < GOODIX55X4_FINGER_DIFF) {
++    // FDT fired without a finger; an empty frame can never match, so wait
++    // for a real touch instead of reporting it.
++    g_print("capture: no finger in triggered frame (diff %.1f), re-arming\n",
++            diff);
++    poll_later(dev, ssm, SCAN_STAGE_FDT_MODE);
++    return;
++  }
++  self->finger_diff = diff;
++  self->polls = 0;
++  fpi_ssm_next_state(ssm);
++}
+ 
 -    GSList *frames = NULL;
 -    frame_processing_info pinfo = {.dev = self, .frames = &frames};
--
++static void scan_on_settle_img(FpDevice *dev, guint8 *data, guint16 len,
++                               gpointer ssm, GError *err) {
++  if (err) {
++    fpi_ssm_mark_failed(ssm, err);
++    return;
++  }
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
+ 
 -    g_slist_foreach(raw_frames, (GFunc)process_frame, &pinfo);
 -    frames = g_slist_reverse(frames);
--
++  Goodix55X4Pix *frame = g_new(Goodix55X4Pix, GOODIX55X4_FRAME_SIZE);
++  decode_frame(frame, data);
++  const double diff = frame_baseline_diff(frame, self->empty_img);
++  if (diff > self->finger_diff) {
++    memcpy(self->capture_img, frame, sizeof(self->capture_img));
++    self->finger_diff = diff;
++  }
++  g_free(frame);
+ 
 -    g_print("MOVEMENT EST\n");
 -    fpi_do_movement_estimation(&assembly_ctx, frames);
 -    g_print("MOVEMENT EST DOOONEE\n");
 -    FpImage *img = fpi_assemble_frames(&assembly_ctx, frames);
-+  FpImageDevice *img_dev = FP_IMAGE_DEVICE(dev);
++  if (++self->polls < GOODIX55X4_SETTLE_READS)
++    fpi_ssm_jump_to_state(ssm, SCAN_STAGE_SETTLE_FDT_MODE);
++  else
++    fpi_ssm_next_state(ssm);
++}
  
 -    g_slist_free_full(frames, g_free);
 -    g_slist_free_full(self->frames, g_free);
 -    self->frames = g_slist_alloc();
-+  Goodix55X4Pix *frame = malloc(GOODIX55X4_FRAME_SIZE * sizeof(Goodix55X4Pix));
-+  decode_frame(frame, data);
-+  postprocess_frame(frame, self->empty_img);
++static void scan_report_img(FpDevice *dev, FpiSsm *ssm) {
++  // 27c6:5584: single press frame, subtracted against the calibration
++  // baseline captured at SCAN_STAGE_CAL_IMG.
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  g_print("capture: finger frame, baseline diff %.1f\n", self->finger_diff);
++  postprocess_frame(self->capture_img, self->empty_img);
  
 -    g_print("Signal IMG Capture\n");
 -    fpi_image_device_image_captured(img_dev, img);
 -    // save_image_to_pgm(img, "finger.pgm");
 +  FpImage *img = fp_image_new(GOODIX55X4_WIDTH, GOODIX55X4_HEIGHT);
-+  squash_frame_linear(frame, img->data);
-+  free(frame);
++  squash_frame_linear(self->capture_img, img->data);
  
 -    g_print("Next State\n");
 -    fpi_ssm_next_state(ssm);
 -  }
-+  g_print("Signal IMG Capture\n");
-+  fpi_image_device_image_captured(img_dev, img);
++  self->polls = 0;
++  fpi_image_device_image_captured(FP_IMAGE_DEVICE(dev), img);
 +  fpi_ssm_next_state(ssm);
  }
  
  gboolean save_image_to_pgm2(guchar *data, const char *path) {
-@@ -606,12 +507,6 @@ gboolean save_image_to_pgm(FpImage *img, const char *path) {
+@@ -606,12 +600,6 @@ gboolean save_image_to_pgm(FpImage *img, const char *path) {
    return TRUE;
  }
  
@@ -649,31 +738,90 @@ index 20db582..b014792 100644
  static void on_scan_empty_img(FpDevice *dev, guint8 *data, guint16 length,
                                gpointer ssm, GError *error) {
    if (error) {
-@@ -620,100 +515,83 @@ static void on_scan_empty_img(FpDevice *dev, guint8 *data, guint16 length,
+@@ -619,101 +607,160 @@ static void on_scan_empty_img(FpDevice *dev, guint8 *data, guint16 length,
+     return;
    }
    FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
-   decode_frame(self->empty_img, data);
+-  decode_frame(self->empty_img, data);
 -  // FpImage *bgk = fp_image_new(GOODIX55X4_WIDTH, GOODIX55X4_HEIGHT);
 -  // squash_frame(self->empty_img, bgk->data);
 -  // save_image_to_pgm(bgk, "./background.pgm");
++
++  Goodix55X4Pix *frame = g_new(Goodix55X4Pix, GOODIX55X4_FRAME_SIZE);
++  decode_frame(frame, data);
++  // A retry can start while the finger is still down; calibrating then would
++  // make the finger the "empty" baseline and ruin every later capture. If we
++  // have a known-empty baseline, wait until the sensor matches it again.
++  if (self->have_empty) {
++    const double diff = frame_baseline_diff(frame, self->empty_img);
++    if (diff >= GOODIX55X4_FINGER_DIFF) {
++      if (++self->polls < GOODIX55X4_CAL_MAX_POLLS) {
++        g_print("calibration: finger still on the sensor (diff %.1f), "
++                "waiting\n", diff);
++        g_free(frame);
++        poll_later(dev, ssm, SCAN_STAGE_FDT_MODE_CAL);
++        return;
++      }
++      // Either a finger is resting on the sensor or the sensor drifted;
++      // we cannot tell, so stop trusting the old baseline.
++      fp_warn("calibration: sensor still differs from the known-empty "
++              "baseline after %u polls (diff %.1f); recalibrating anyway",
++              self->polls, diff);
++      self->have_empty = FALSE;
++    }
++  }
++  memcpy(self->empty_img, frame, sizeof(self->empty_img));
++  g_free(frame);
++  self->polls = 0;
    fpi_ssm_next_state(ssm);
  }
 -static void scan_empty_run(FpiSsm *ssm, FpDevice *dev) {
 -
 -  switch (fpi_ssm_get_cur_state(ssm)) {
--
+ 
 -  case SCAN_EMPTY_GET_IMG:
 -    goodix_tls_read_image(dev, on_scan_empty_img, ssm);
 -    break;
--  }
++// Finger-off polling: report the finger off only once a frame looks like the
++// empty baseline again; otherwise the next scan (enroll stage or verify retry)
++// fires on the same touch.
++static void scan_on_off_img(FpDevice *dev, guint8 *data, guint16 len,
++                            gpointer ssm, GError *err) {
++  if (err) {
++    fpi_ssm_mark_failed(ssm, err);
++    return;
++  }
++  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4(dev);
++  if (self->deactivating) {
++    fpi_ssm_mark_completed(ssm);
++    return;
+   }
 -}
--
+ 
 -static void scan_empty_img(FpDevice *dev, FpiSsm *ssm) {
 -  fpi_ssm_start_subsm(ssm, fpi_ssm_new(dev, scan_empty_run, SCAN_EMPTY_NUM));
 -}
++  Goodix55X4Pix *frame = g_new(Goodix55X4Pix, GOODIX55X4_FRAME_SIZE);
++  decode_frame(frame, data);
++  const double diff = frame_baseline_diff(frame, self->empty_img);
++  g_free(frame);
  
- static void scan_get_img(FpDevice *dev, FpiSsm *ssm) {
-   goodix_tls_read_image(dev, scan_on_read_img, ssm);
+-static void scan_get_img(FpDevice *dev, FpiSsm *ssm) {
+-  goodix_tls_read_image(dev, scan_on_read_img, ssm);
++  self->polls++;
++  if (diff < GOODIX55X4_FINGER_DIFF) {
++    // A real finger came and went, so empty_img is a trustworthy baseline.
++    self->have_empty = TRUE;
++    g_print("finger off after %u polls (diff %.1f)\n", self->polls, diff);
++    fpi_ssm_next_state(ssm);
++  } else if (self->polls >= GOODIX55X4_OFF_MAX_POLLS) {
++    fp_warn("finger still detected after %u polls (diff %.1f, captured "
++            "%.1f); reporting finger off anyway",
++            self->polls, diff, self->finger_diff);
++    fpi_ssm_next_state(ssm);
++  } else {
++    poll_later(dev, ssm, SCAN_STAGE_FDT_MODE2);
++  }
  }
  
 +// FDT manual baseline values captured from the Windows driver on this
@@ -720,13 +868,13 @@ index 20db582..b014792 100644
 +    goodix_send_mcu_switch_to_fdt_mode(
 +        dev, (guint8 *)fdt_switch_state_mode_55X4,
 +        sizeof(fdt_switch_state_mode_55X4), NULL, check_none_cmd, ssm);
-+    break;
-+
-+  case SCAN_STAGE_CAL_IMG:
-+    goodix_tls_read_image(dev, on_scan_empty_img, ssm);
      break;
 -  case SCAN_STAGE_SWITCH_TO_FDT_MODE:
 -    g_print("SWITCH TO FDT MODE\n");
++
++  case SCAN_STAGE_CAL_IMG:
++    goodix_tls_read_image(dev, on_scan_empty_img, ssm);
++    break;
 +
 +  case SCAN_STAGE_FDT_MODE:
      goodix_send_mcu_switch_to_fdt_mode(
@@ -763,31 +911,48 @@ index 20db582..b014792 100644
 -    // goodix_send_mcu_get_image(dev, check_none_cmd, ssm);
 -    // goodix_send_write_sensor_register(dev, 0x022c, payload,
 -    // write_sensor_complete, ssm);
-     scan_get_img(dev, ssm);
+-    scan_get_img(dev, ssm);
++    goodix_tls_read_image(dev, scan_on_read_img, ssm);
      break;
 -  case SCAN_STAGE_SWITCH_TO_FDT_MODE2:
 -    g_print("SWITCH TO FDT MODE 2\n");
 +
-+  case SCAN_STAGE_FDT_MODE2:
++  case SCAN_STAGE_SETTLE_FDT_MODE:
      goodix_send_mcu_switch_to_fdt_mode(
 -        dev, (guint8 *)fdt_switch_state_mode2_55X4,
 -        sizeof(fdt_switch_state_mode2_55X4), NULL, check_none_cmd, ssm);
--    break;
++        dev, (guint8 *)fdt_switch_state_mode_55X4,
++        sizeof(fdt_switch_state_mode_55X4), NULL, check_none_cmd, ssm);
+     break;
 -  case SCAN_STAGE_SWITCH_TO_FDT_UP_NO_REPLY:
 -    g_print("SWITCH TO FDT UP NO REPLY\n");
 -    goodix_send_mcu_switch_to_fdt_up_no_reply(
 -        dev, (guint8 *)fdt_switch_state_up_55X4,
 -        sizeof(fdt_switch_state_up_55X4), NULL, check_none_cmd, ssm);
--    break;
++
++  case SCAN_STAGE_SETTLE_READ:
++    goodix_tls_read_image(dev, scan_on_settle_img, ssm);
+     break;
 -  case SCAN_STAGE_SWITCH_TO_FDT_UP:
 -    g_print("SWITCH TO FDT UP\n");
 -    goodix_send_mcu_switch_to_fdt_up(dev, (guint8 *)fdt_switch_state_up_55X4,
 -                                     sizeof(fdt_switch_state_up_55X4), NULL,
 -                                     check_none_cmd, ssm);
-+        dev, (guint8 *)fdt_switch_state_mode_55X4,
-+        sizeof(fdt_switch_state_mode_55X4), NULL, check_none_cmd, ssm);
++
++  case SCAN_STAGE_REPORT_IMG:
++    scan_report_img(dev, ssm);
      break;
 -  case SCAN_STAGE_SWITCH_TO_FDT_DONE:
++
++  case SCAN_STAGE_FDT_MODE2:
++    goodix_send_mcu_switch_to_fdt_mode(
++        dev, (guint8 *)fdt_switch_state_mode_55X4,
++        sizeof(fdt_switch_state_mode_55X4), NULL, check_none_cmd, ssm);
++    break;
++
++  case SCAN_STAGE_OFF_READ:
++    goodix_tls_read_image(dev, scan_on_off_img, ssm);
++    break;
 +
 +  case SCAN_STAGE_DONE:
      fpi_image_device_report_finger_status(img_dev, FALSE);
@@ -795,7 +960,7 @@ index 20db582..b014792 100644
      break;
    }
  }
-@@ -722,35 +600,23 @@ static void sleep_run_state(FpiSsm *ssm, FpDevice *dev) {
+@@ -722,35 +769,23 @@ static void sleep_run_state(FpiSsm *ssm, FpDevice *dev) {
    FpImageDevice *img_dev = FP_IMAGE_DEVICE(dev);
  
    switch (fpi_ssm_get_cur_state(ssm)) {
@@ -837,6 +1002,30 @@ index 20db582..b014792 100644
  }
  
  static void scan_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
+@@ -772,6 +807,7 @@ static void sleep_complete(FpiSsm *ssm, FpDevice *dev, GError *error) {
+ }
+ 
+ static void scan_start(FpiDeviceGoodixTls55X4 *dev) {
++  dev->polls = 0;
+   fpi_ssm_start(fpi_ssm_new(FP_DEVICE(dev), scan_run_state, SCAN_STAGE_NUM),
+                 scan_complete);
+ }
+@@ -811,6 +847,7 @@ static void dev_deinit(FpImageDevice *img_dev) {
+ 
+ static void dev_activate(FpImageDevice *img_dev) {
+   FpDevice *dev = FP_DEVICE(img_dev);
++  FPI_DEVICE_GOODIXTLS55X4(img_dev)->deactivating = FALSE;
+ 
+   fpi_ssm_start(fpi_ssm_new(dev, activate_run_state, ACTIVATE_NUM_STATES),
+                 activate_complete);
+@@ -832,6 +869,7 @@ static void dev_change_state(FpImageDevice *img_dev,
+ 
+ static void dev_deactivate(FpImageDevice *img_dev) {
+   FpDevice *dev = FP_DEVICE(img_dev);
++  FPI_DEVICE_GOODIXTLS55X4(img_dev)->deactivating = TRUE;
+   fpi_device_add_timeout(dev, 250, sleep_start, NULL, NULL);
+ }
+ 
 diff --git a/libfprint/drivers/goodixtls/goodix55x4.h b/libfprint/drivers/goodixtls/goodix55x4.h
 index ccbcfaa..7d23424 100644
 --- a/libfprint/drivers/goodixtls/goodix55x4.h
