@@ -60,6 +60,12 @@ LD_LIBRARY_PATH=libfprint/build/libfprint \
   minutiae on this small, smooth sensor (real frames 1-5, reference
   prints 90+). The SIGFM stub is only used when opencv is unavailable;
   on Arch, opencv 5.x is found via pkg-config `opencv5`.
+- Judges finger presence from frames (mean difference from the empty
+  baseline; empty is about 10, a finger 450 to 930, threshold 100) instead
+  of trusting the FDT trigger: empty triggers re-arm instead of being
+  reported, the firmest of three frames per touch is kept, the finger is
+  reported off only once frames look empty again, and calibration waits for
+  an empty sensor. Each wait has a cap so the device cannot wedge.
 - Adds the `capture-minutiae` example used for the goal proof.
 
 ## Enroll / verify test
