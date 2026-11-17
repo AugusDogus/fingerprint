@@ -56,6 +56,20 @@ static const uint8_t RT_MCU_PSK_READ_DPAPI_CMD[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+/* Read-only PRESET_PSK_READ_R of TLV 0xbb020007 (the PSK hash the driver
+ * checks before a session). Same shape as the DPAPI read; the Windows warm
+ * session reads this TLV too. */
+static const uint8_t RT_MCU_PSK_READ_HASH_CMD[] = {
+    0xa0, 0x0c, 0x00, 0xac, 0xe4, 0x09, 0x00, 0x07,
+    0x00, 0x02, 0xbb, 0x00, 0x00, 0x00, 0x00, 0xf9,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
 static void print_hex(const char *label, const uint8_t *buf, int len) {
     printf("%s (%d bytes):", label, len);
     for (int i = 0; i < len; i++) {
@@ -194,12 +208,21 @@ static int send_rt_version(libusb_device_handle *handle) {
     return read_responses(handle, 6000, 250, 4);
 }
 
+/* Reads the DPAPI-encrypted PSK blob, then the PSK hash. Both are read-only;
+ * tools/extract_psk.py turns this output into the inputs for key setup. */
 static int send_rt_psk_read(libusb_device_handle *handle) {
     int rc = send_frame(handle, RT_MCU_PSK_READ_DPAPI_CMD, sizeof(RT_MCU_PSK_READ_DPAPI_CMD));
+    if (rc == 0) {
+        rc = read_responses(handle, 6000, 250, 3);
+    }
     if (rc != 0) {
         return rc;
     }
 
+    rc = send_frame(handle, RT_MCU_PSK_READ_HASH_CMD, sizeof(RT_MCU_PSK_READ_HASH_CMD));
+    if (rc != 0) {
+        return rc;
+    }
     return read_responses(handle, 6000, 250, 3);
 }
 

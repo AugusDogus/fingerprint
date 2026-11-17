@@ -33,30 +33,42 @@ Windows pairs with the reader using a random per-device pre-shared key
 (PSK). The reader stores it encrypted with Windows DPAPI, so it can be
 recovered without changing anything on the reader:
 
-1. Read the encrypted key (TLV `0xbb010002`) from the reader. This is a
-   read-only command:
+1. On Linux, read the encrypted key (TLV `0xbb010002`) and the key's hash
+   (TLV `0xbb020007`) from the reader. Both reads are read-only. Stop
+   `fprintd` first so it isn't holding the reader:
 
    ```sh
    make
-   ./build/goodix-probe rt-psk-read
+   mkdir -p captures
+   sudo systemctl stop fprintd
+   ./build/goodix-probe rt-psk-read > captures/psk-read.txt
+   python3 tools/extract_psk.py captures/psk-read.txt \
+       --blob captures/psk_dpapi_blob.bin --hash captures/psk_hash.hex
    ```
 
-2. Decrypt it inside the Windows install that paired the reader, with DPAPI
-   as `SYSTEM` (the Windows Biometric Service context). The result is the
-   32-byte PSK.
-3. Note the reader's 32-byte PSK hash (TLV `0xbb020007`); the driver checks
-   it before starting a session.
+2. In the Windows install that paired the reader, decrypt the blob as
+   `SYSTEM` (the Windows Biometric Service context). Copy
+   `captures/psk_dpapi_blob.bin` and `tools/windows/` over, then run from an
+   elevated PowerShell:
 
-This step is still manual. The exact frames, TLV layout, and how this unit's
-key was recovered are in
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File tools\windows\unseal-as-system.ps1 -BlobPath psk_dpapi_blob.bin
+   ```
+
+   It prints the 32-byte PSK as hex. These scripts are cleaned-up versions of
+   the ones used for this unit and haven't been re-run since.
+
+3. Back on Linux, combine the PSK and the hash into `captures/psk.hex` (PSK
+   on the first line, hash on the second) and install it for `fprintd`:
+
+   ```sh
+   printf '%s\n' '<psk hex from step 2>' > captures/psk.hex
+   cat captures/psk_hash.hex >> captures/psk.hex
+   sudo install -Dm600 -o root -g root captures/psk.hex /etc/goodix5584/psk.hex
+   ```
+
+The frames and TLV layout behind these steps are in
 [docs/protocol-notes.md](docs/protocol-notes.md#psk-provisioning-analysis-2026-07-20).
-
-Save both values as a two-line hex file (PSK, then PSK hash) and install it
-for `fprintd`:
-
-```sh
-sudo install -Dm600 -o root -g root captures/psk.hex /etc/goodix5584/psk.hex
-```
 
 The driver looks for the file at `$GOODIX5584_SECRETS_FILE`, then
 `/etc/goodix5584/psk.hex`, then `captures/psk.hex` relative to the working
@@ -123,7 +135,8 @@ cd packaging && makepkg -Cfsi
 | `packaging/` | PKGBUILD that builds the patched libfprint as a pacman package |
 | `docs/protocol-notes.md` | Protocol reverse-engineering notes |
 | `src/goodix_probe.c` | Small libusb probe: NOP, firmware version, PSK read |
-| `tools/` | RTSEC codec and tests, capture replay, offline TLS decryption, live TLS session tools |
+| `tools/` | Key extraction, RTSEC codec and tests, capture replay, offline TLS decryption, live TLS session tools |
+| `tools/windows/` | PowerShell scripts that decrypt the pairing key as `SYSTEM` |
 
 Gitignored and kept local: `captures/` (USB captures and the key),
 `windows-drivers/` (the Windows driver payload), and enrolled test prints.
