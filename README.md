@@ -5,8 +5,7 @@ Linux support for the Screek PC-FS1 USB fingerprint reader (Goodix
 reverse engineering the Windows driver.
 
 The result is a patched libfprint driver that works with `fprintd`: enroll,
-verify, and PAM/polkit prompts (for example, unlocking Bitwarden with a
-fingerprint). It reuses the reader's existing Windows pairing key, so the
+verify, and PAM/polkit prompts. It reuses the reader's existing Windows pairing key, so the
 reader keeps working in Windows too.
 
 ## Status
@@ -87,8 +86,8 @@ Authentication**.
 
 ### 4. Use it for polkit prompts (optional)
 
-To accept a fingerprint in polkit prompts (Bitwarden's "Unlock with system
-authentication" uses one), create `/etc/pam.d/polkit-1`:
+To accept a fingerprint in polkit authentication prompts, create
+`/etc/pam.d/polkit-1`:
 
 ```
 #%PAM-1.0
@@ -99,10 +98,7 @@ password   include      system-auth
 session    include      system-auth
 ```
 
-The password still works if the fingerprint fails or times out. Bitwarden
-also needs its polkit action file at
-`/usr/share/polkit-1/actions/com.bitwarden.Bitwarden.policy` (action
-`com.bitwarden.Bitwarden.unlock`, `allow_active` set to `auth_self`).
+The password still works if the fingerprint fails or times out.
 
 ## Maintenance
 
